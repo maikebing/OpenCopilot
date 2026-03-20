@@ -21,8 +21,21 @@ namespace OpenCopilot.Completion
     internal class CompletionSourceProvider : IAsyncCompletionSourceProvider
     {
         // These are set by the package after it initialises its services.
-        internal static LlmService LlmServiceInstance { get; set; }
-        internal static OpenCopilotOptionsPage OptionsPageInstance { get; set; }
+        // volatile ensures the write is visible to all threads immediately.
+        private static volatile LlmService _llmServiceInstance;
+        private static volatile OpenCopilotOptionsPage _optionsPageInstance;
+
+        internal static LlmService LlmServiceInstance
+        {
+            get => _llmServiceInstance;
+            set => _llmServiceInstance = value;
+        }
+
+        internal static OpenCopilotOptionsPage OptionsPageInstance
+        {
+            get => _optionsPageInstance;
+            set => _optionsPageInstance = value;
+        }
 
         public IAsyncCompletionSource GetOrCreate(ITextView textView)
         {

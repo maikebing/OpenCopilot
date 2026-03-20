@@ -21,6 +21,9 @@ namespace OpenCopilot.Providers
         private string _model;
         private bool _disposed;
 
+        // Per-request cancellation timeout for non-streaming calls.
+        private const int RequestTimeoutSeconds = 30;
+
         public virtual string Name => "OpenAI";
 
         public virtual string[] AvailableModels => new[]
@@ -56,7 +59,7 @@ namespace OpenCopilot.Providers
                 SetAuthHeader(httpRequest);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(30));
+                cts.CancelAfter(TimeSpan.FromSeconds(RequestTimeoutSeconds));
 
                 var response = await _httpClient.SendAsync(httpRequest, cts.Token).ConfigureAwait(false);
                 var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);

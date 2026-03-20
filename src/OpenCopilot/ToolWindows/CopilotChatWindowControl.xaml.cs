@@ -20,6 +20,10 @@ namespace OpenCopilot.ToolWindows
         private LlmService? _llmService;
         private CancellationTokenSource? _cts;
 
+        // Number of recent messages sent as conversation history to the LLM.
+        // Keeping this bounded avoids exceeding context-window limits.
+        private const int MaxHistoryMessages = 20;
+
         // Cached references to named XAML elements (populated after InitializeComponent)
         private TextBlock? _statusLabel;
         private ScrollViewer? _chatScrollViewer;
@@ -153,7 +157,7 @@ namespace OpenCopilot.ToolWindows
         private System.Collections.Generic.List<OpenCopilot.Providers.LlmMessage> BuildHistory()
         {
             var history = new System.Collections.Generic.List<OpenCopilot.Providers.LlmMessage>();
-            int start = Math.Max(0, _messages.Count - 20);
+            int start = Math.Max(0, _messages.Count - MaxHistoryMessages);
             for (int i = start; i < _messages.Count; i++)
             {
                 var m = _messages[i];

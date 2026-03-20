@@ -20,6 +20,9 @@ namespace OpenCopilot.Providers
         private string _model;
         private bool _disposed;
 
+        // Ollama runs locally and may take longer than cloud APIs for large models.
+        private const int RequestTimeoutSeconds = 60;
+
         public string Name => "Ollama";
 
         private string[] _availableModels = new[] { "codellama", "llama3", "mistral", "phi3", "gemma2" };
@@ -40,7 +43,7 @@ namespace OpenCopilot.Providers
                 var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(60));
+                cts.CancelAfter(TimeSpan.FromSeconds(RequestTimeoutSeconds));
 
                 var response = await _httpClient.PostAsync($"{_baseUrl}/api/chat", content, cts.Token).ConfigureAwait(false);
                 var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);

@@ -20,7 +20,13 @@ namespace OpenCopilot.Completion
     {
         private readonly LlmService _llmService;
         private readonly OpenCopilotOptionsPage _optionsPage;
+
+        // 40 lines before the cursor gives the model enough context to infer intent
+        // without exceeding typical prompt size limits for completion use cases.
         private const int ContextLines = 40;
+
+        // Maximum length of the completion display text shown in the IntelliSense popup.
+        private const int MaxDisplayLength = 80;
 
         public CompletionSource(LlmService llmService, OpenCopilotOptionsPage optionsPage)
         {
@@ -169,7 +175,7 @@ namespace OpenCopilot.Completion
             return new SnapshotSpan(snapshot, start, position - start);
         }
 
-        private static string TruncateForDisplay(string text, int maxLength = 80)
+        private static string TruncateForDisplay(string text, int maxLength = MaxDisplayLength)
         {
             if (text.Length <= maxLength) return text;
             var firstLine = text.IndexOf('\n');
