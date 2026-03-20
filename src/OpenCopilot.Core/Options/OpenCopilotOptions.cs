@@ -44,6 +44,23 @@ namespace OpenCopilot.Options
         /// <summary>HTTP proxy URL, e.g. <c>http://127.0.0.1:7890</c>.</summary>
         public string ProxyUrl { get; set; } = "http://127.0.0.1:7890";
 
+        // ── MCP ───────────────────────────────────────────────────────────────
+        /// <summary>Enable the built-in Bing web-search MCP tool.</summary>
+        public bool McpEnableWebSearch { get; set; } = false;
+
+        /// <summary>
+        /// Bing Web Search v7 API key (Azure Cognitive Services / Bing Search resource).
+        /// Required when <see cref="McpEnableWebSearch"/> is <see langword="true"/>.
+        /// </summary>
+        public string BingSearchApiKey { get; set; } = "";
+
+        /// <summary>
+        /// Comma-separated names of MCP servers that are disabled (excluded from tool calls).
+        /// Built-in tools are always enabled regardless of this setting.
+        /// Example: <c>"filesystem,my-custom-server"</c>
+        /// </summary>
+        public string DisabledMcpServers { get; set; } = "";
+
         // ── UI ───────────────────────────────────────────────────────────────
         public bool ShowStatusBarInfo { get; set; } = true;
     }

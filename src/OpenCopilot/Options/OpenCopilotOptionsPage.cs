@@ -201,6 +201,41 @@ namespace OpenCopilot.Options
             set => _options.ProxyUrl = value;
         }
 
+        // ── MCP ───────────────────────────────────────────────────────────────
+
+        [Category("MCP")]
+        [DisplayName("Enable Web Search")]
+        [Description("Enable the built-in Bing web-search MCP tool (web_search). " +
+                     "Like VS Code's @web capability, this lets the AI search the web via Microsoft Bing " +
+                     "when it needs up-to-date information. Requires a Bing Search API key below.")]
+        public bool McpEnableWebSearch
+        {
+            get => _options.McpEnableWebSearch;
+            set => _options.McpEnableWebSearch = value;
+        }
+
+        [Category("MCP")]
+        [DisplayName("Bing Search API Key")]
+        [Description("Azure Cognitive Services / Bing Search v7 API key. " +
+                     "Create a free-tier key at https://portal.azure.com/ (Bing Search resource).")]
+        [PasswordPropertyText(true)]
+        public string BingSearchApiKey
+        {
+            get => _options.BingSearchApiKey;
+            set => _options.BingSearchApiKey = value;
+        }
+
+        [Category("MCP")]
+        [DisplayName("Disabled MCP Servers")]
+        [Description("Comma-separated list of MCP server names to exclude from the active tool set. " +
+                     "This is the MCP scope selector: only servers NOT listed here are queried. " +
+                     "Example: \"filesystem,my-custom-server\". Built-in tools are always available.")]
+        public string DisabledMcpServers
+        {
+            get => _options.DisabledMcpServers;
+            set => _options.DisabledMcpServers = value;
+        }
+
         // ── Serialization ────────────────────────────────────────────────────
 
         /// <summary>Returns a snapshot of the current settings.</summary>
@@ -223,7 +258,10 @@ namespace OpenCopilot.Options
             DockerDesktopAIBaseUrl = DockerDesktopAIBaseUrl,
             DockerDesktopAIModel = DockerDesktopAIModel,
             UseProxy = UseProxy,
-            ProxyUrl = ProxyUrl
+            ProxyUrl = ProxyUrl,
+            McpEnableWebSearch = McpEnableWebSearch,
+            BingSearchApiKey = BingSearchApiKey,
+            DisabledMcpServers = DisabledMcpServers
         };
     }
 }

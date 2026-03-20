@@ -17,5 +17,11 @@ namespace OpenCopilot.Mcp
         // Optional: override displayed name
         public string? DisplayName { get; set; }
         public bool IsBuiltIn { get; set; } = false;
+        /// <summary>
+        /// When <see langword="false"/> the server is discovered but not connected and its
+        /// tools are excluded from the active tool set. Users control this through the
+        /// Tools &gt; Options &gt; OpenCopilot &gt; MCP Scope setting.
+        /// </summary>
+        public bool IsEnabled { get; set; } = true;
     }
 }

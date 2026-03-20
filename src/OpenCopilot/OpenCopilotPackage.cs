@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,6 +48,7 @@ namespace OpenCopilot
 
         private LlmService _llmService;
         private McpService _mcpService;
+        private BingWebSearchTool? _bingSearchTool;
         private OpenCopilotOptionsPage _optionsPage;
 
         #region Package initialisation
@@ -70,6 +72,15 @@ namespace OpenCopilot
             // Set up MCP service with built-in VS tools and discovered servers
             _mcpService = new McpService();
             new VsFileEditingTools(this).RegisterInto(_mcpService);
+
+            // Built-in web search tool (Bing)
+            var proxyUrlForSearch = options.UseProxy ? options.ProxyUrl : null;
+            _bingSearchTool = new BingWebSearchTool(options.BingSearchApiKey, proxyUrlForSearch);
+            if (options.McpEnableWebSearch)
+                _bingSearchTool.RegisterInto(_mcpService);
+
+            // Apply disabled-server scope from settings
+            _mcpService.SetDisabledServers(ParseDisabledServers(options.DisabledMcpServers));
 
             var discovery = new McpDiscovery();
             var mcpConfigs = discovery.Discover(GetSolutionDirectory());
@@ -171,6 +182,20 @@ namespace OpenCopilot
             UpdateProviderSettings(options);
             ApplyActiveProvider(options);
 
+            // Bing web search tool — update key/proxy; re-register if newly enabled
+            if (_bingSearchTool != null)
+            {
+                var proxyUrl = options.UseProxy ? options.ProxyUrl : null;
+                _bingSearchTool.UpdateSettings(options.BingSearchApiKey, proxyUrl);
+                // Re-register only if enabled and not already registered
+                // (re-registration is idempotent: RegisterBuiltInTool overwrites)
+                if (options.McpEnableWebSearch)
+                    _bingSearchTool.RegisterInto(_mcpService);
+            }
+
+            // Apply updated disabled-server scope
+            _mcpService.SetDisabledServers(ParseDisabledServers(options.DisabledMcpServers));
+
             if (options.ShowStatusBarInfo)
                 _ = UpdateStatusBarAsync(options);
         }
@@ -198,6 +223,18 @@ namespace OpenCopilot
         #endregion
 
         #region MCP
+
+        private static IEnumerable<string> ParseDisabledServers(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                yield break;
+            foreach (var part in raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var name = part.Trim();
+                if (!string.IsNullOrWhiteSpace(name))
+                    yield return name;
+            }
+        }
 
         private string? GetSolutionDirectory()
         {
