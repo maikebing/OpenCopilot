@@ -16,8 +16,10 @@ namespace OpenCopilot.Providers
             "ai/qwen2.5-coder"
         };
 
-        public DockerDesktopAIProvider(string model = "ai/smollm2", string baseUrl = "http://localhost:12434/engines/llama.cpp/v1")
-            : base(string.Empty, model, baseUrl)
+        public DockerDesktopAIProvider(string model = "ai/smollm2",
+            string baseUrl = "http://localhost:12434/engines/llama.cpp/v1",
+            string? proxyUrl = null)
+            : base(string.Empty, model, baseUrl, proxyUrl)
         {
         }
     }

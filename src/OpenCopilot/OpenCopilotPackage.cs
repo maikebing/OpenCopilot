@@ -107,20 +107,24 @@ namespace OpenCopilot
 
         private void RegisterProviders(OpenCopilotOptions options)
         {
-            _llmService.RegisterProvider(
-                new OpenAIProvider(options.OpenAIApiKey, options.OpenAIModel, options.OpenAIBaseUrl));
+            var proxyUrl = options.UseProxy ? options.ProxyUrl : null;
 
             _llmService.RegisterProvider(
-                new DeepSeekProvider(options.DeepSeekApiKey, options.DeepSeekModel));
+                new OpenAIProvider(options.OpenAIApiKey, options.OpenAIModel, options.OpenAIBaseUrl, proxyUrl));
 
             _llmService.RegisterProvider(
-                new DoubaoProvider(options.DoubaoApiKey, options.DoubaoModel));
+                new DeepSeekProvider(options.DeepSeekApiKey, options.DeepSeekModel, proxyUrl));
 
             _llmService.RegisterProvider(
-                new OllamaProvider(options.OllamaBaseUrl, options.OllamaModel));
+                new DoubaoProvider(options.DoubaoApiKey, options.DoubaoModel, proxyUrl));
+
+            // Local providers: pass proxyUrl too; bypassOnLocal=true in HttpClientFactory
+            // means localhost traffic is never sent through the proxy regardless.
+            _llmService.RegisterProvider(
+                new OllamaProvider(options.OllamaBaseUrl, options.OllamaModel, proxyUrl));
 
             _llmService.RegisterProvider(
-                new DockerDesktopAIProvider(options.DockerDesktopAIModel, options.DockerDesktopAIBaseUrl));
+                new DockerDesktopAIProvider(options.DockerDesktopAIModel, options.DockerDesktopAIBaseUrl, proxyUrl));
         }
 
         private void ApplyActiveProvider(OpenCopilotOptions options)
@@ -173,20 +177,22 @@ namespace OpenCopilot
 
         private void UpdateProviderSettings(OpenCopilotOptions options)
         {
+            var proxyUrl = options.UseProxy ? options.ProxyUrl : null;
+
             if (_llmService.GetProvider("OpenAI") is OpenAIProvider openai)
-                openai.UpdateSettings(options.OpenAIApiKey, options.OpenAIModel, options.OpenAIBaseUrl);
+                openai.UpdateSettings(options.OpenAIApiKey, options.OpenAIModel, options.OpenAIBaseUrl, proxyUrl);
 
             if (_llmService.GetProvider("DeepSeek") is DeepSeekProvider deepseek)
-                deepseek.UpdateSettings(options.DeepSeekApiKey, options.DeepSeekModel, "https://api.deepseek.com/v1");
+                deepseek.UpdateSettings(options.DeepSeekApiKey, options.DeepSeekModel, "https://api.deepseek.com/v1", proxyUrl);
 
             if (_llmService.GetProvider("Doubao") is DoubaoProvider doubao)
-                doubao.UpdateSettings(options.DoubaoApiKey, options.DoubaoModel, "https://ark.cn-beijing.volces.com/api/v3");
+                doubao.UpdateSettings(options.DoubaoApiKey, options.DoubaoModel, "https://ark.cn-beijing.volces.com/api/v3", proxyUrl);
 
             if (_llmService.GetProvider("Ollama") is OllamaProvider ollama)
-                ollama.UpdateSettings(options.OllamaBaseUrl, options.OllamaModel);
+                ollama.UpdateSettings(options.OllamaBaseUrl, options.OllamaModel, proxyUrl);
 
             if (_llmService.GetProvider("Docker Desktop AI") is DockerDesktopAIProvider docker)
-                docker.UpdateSettings(string.Empty, options.DockerDesktopAIModel, options.DockerDesktopAIBaseUrl);
+                docker.UpdateSettings(string.Empty, options.DockerDesktopAIModel, options.DockerDesktopAIBaseUrl, proxyUrl);
         }
 
         #endregion

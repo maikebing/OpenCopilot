@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using OpenCopilot.Http;
 
 namespace OpenCopilot.Providers
 {
@@ -15,9 +16,10 @@ namespace OpenCopilot.Providers
     /// </summary>
     public class OllamaProvider : ILlmProvider, IDisposable
     {
-        private readonly HttpClient _httpClient;
+        private HttpClient _httpClient;
         private string _baseUrl;
         private string _model;
+        private string? _proxyUrl;
         private bool _disposed;
 
         // Ollama runs locally and may take longer than cloud APIs for large models.
@@ -28,11 +30,20 @@ namespace OpenCopilot.Providers
         private string[] _availableModels = new[] { "codellama", "llama3", "mistral", "phi3", "gemma2" };
         public string[] AvailableModels => _availableModels;
 
-        public OllamaProvider(string baseUrl = "http://localhost:11434", string model = "codellama")
+        /// <param name="baseUrl">Ollama server URL (default <c>http://localhost:11434</c>).</param>
+        /// <param name="model">Model tag to use.</param>
+        /// <param name="proxyUrl">
+        /// Optional HTTP proxy. Because Ollama is typically localhost the
+        /// <see cref="HttpClientFactory"/> already sets <c>bypassOnLocal=true</c>, so
+        /// passing a proxy here has no practical effect unless Ollama is on a remote host.
+        /// </param>
+        public OllamaProvider(string baseUrl = "http://localhost:11434", string model = "codellama",
+            string? proxyUrl = null)
         {
             _baseUrl = baseUrl.TrimEnd('/');
             _model = model;
-            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
+            _proxyUrl = proxyUrl;
+            _httpClient = HttpClientFactory.Create(proxyUrl, TimeSpan.FromSeconds(120));
         }
 
         public virtual async Task<LlmResponse> CompleteAsync(LlmRequest request, CancellationToken cancellationToken = default)
@@ -172,10 +183,18 @@ namespace OpenCopilot.Providers
             };
         }
 
-        public void UpdateSettings(string baseUrl, string model)
+        public void UpdateSettings(string baseUrl, string model, string? proxyUrl = null)
         {
             _baseUrl = baseUrl.TrimEnd('/');
             _model = model;
+
+            if (proxyUrl != _proxyUrl)
+            {
+                var old = _httpClient;
+                _proxyUrl = proxyUrl;
+                _httpClient = HttpClientFactory.Create(proxyUrl, TimeSpan.FromSeconds(120));
+                old.Dispose();
+            }
         }
 
         public void Dispose()

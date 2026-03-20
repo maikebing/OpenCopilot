@@ -14,8 +14,8 @@ namespace OpenCopilot.Providers
             "deepseek-reasoner"
         };
 
-        public DeepSeekProvider(string apiKey, string model = "deepseek-chat")
-            : base(apiKey, model, "https://api.deepseek.com/v1")
+        public DeepSeekProvider(string apiKey, string model = "deepseek-chat", string? proxyUrl = null)
+            : base(apiKey, model, "https://api.deepseek.com/v1", proxyUrl)
         {
         }
     }

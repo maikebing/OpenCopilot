@@ -180,6 +180,27 @@ namespace OpenCopilot.Options
             set => _options.DockerDesktopAIModel = value;
         }
 
+        // ── Proxy ────────────────────────────────────────────────────────────
+
+        [Category("Proxy")]
+        [DisplayName("Use Proxy")]
+        [Description("Route all cloud LLM API calls through the proxy server below. " +
+                     "Localhost providers (Ollama, Docker Desktop AI) are never proxied regardless of this setting.")]
+        public bool UseProxy
+        {
+            get => _options.UseProxy;
+            set => _options.UseProxy = value;
+        }
+
+        [Category("Proxy")]
+        [DisplayName("Proxy URL")]
+        [Description("HTTP proxy URL, e.g. http://127.0.0.1:7890 (Clash / V2Ray / Mihomo default port).")]
+        public string ProxyUrl
+        {
+            get => _options.ProxyUrl;
+            set => _options.ProxyUrl = value;
+        }
+
         // ── Serialization ────────────────────────────────────────────────────
 
         /// <summary>Returns a snapshot of the current settings.</summary>
@@ -200,7 +221,9 @@ namespace OpenCopilot.Options
             OllamaBaseUrl = OllamaBaseUrl,
             OllamaModel = OllamaModel,
             DockerDesktopAIBaseUrl = DockerDesktopAIBaseUrl,
-            DockerDesktopAIModel = DockerDesktopAIModel
+            DockerDesktopAIModel = DockerDesktopAIModel,
+            UseProxy = UseProxy,
+            ProxyUrl = ProxyUrl
         };
     }
 }

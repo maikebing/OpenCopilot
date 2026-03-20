@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using OpenCopilot.Http;
 
 namespace OpenCopilot.Providers
 {
@@ -15,10 +16,11 @@ namespace OpenCopilot.Providers
     /// </summary>
     public class OpenAIProvider : ILlmProvider, IDisposable
     {
-        private readonly HttpClient _httpClient;
+        private HttpClient _httpClient;
         private string _baseUrl;
         private string _apiKey;
         private string _model;
+        private string? _proxyUrl;
         private bool _disposed;
 
         // Per-request cancellation timeout for non-streaming calls.
@@ -35,16 +37,14 @@ namespace OpenCopilot.Providers
             "gpt-3.5-turbo"
         };
 
-        public OpenAIProvider(string apiKey, string model = "gpt-4o-mini", string baseUrl = "https://api.openai.com/v1")
+        public OpenAIProvider(string apiKey, string model = "gpt-4o-mini",
+            string baseUrl = "https://api.openai.com/v1", string? proxyUrl = null)
         {
             _apiKey = apiKey;
             _model = model;
             _baseUrl = baseUrl.TrimEnd('/');
-
-            _httpClient = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(120)
-            };
+            _proxyUrl = proxyUrl;
+            _httpClient = HttpClientFactory.Create(proxyUrl, TimeSpan.FromSeconds(120));
         }
 
         public virtual async Task<LlmResponse> CompleteAsync(LlmRequest request, CancellationToken cancellationToken = default)
@@ -193,11 +193,24 @@ namespace OpenCopilot.Providers
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         }
 
-        public void UpdateSettings(string apiKey, string model, string baseUrl)
+        /// <summary>
+        /// Updates provider settings at runtime.
+        /// When <paramref name="proxyUrl"/> changes the internal <see cref="HttpClient"/> is
+        /// replaced so the new proxy takes effect immediately without restarting Visual Studio.
+        /// </summary>
+        public void UpdateSettings(string apiKey, string model, string baseUrl, string? proxyUrl = null)
         {
             _apiKey = apiKey;
             _model = model;
             _baseUrl = baseUrl.TrimEnd('/');
+
+            if (proxyUrl != _proxyUrl)
+            {
+                var old = _httpClient;
+                _proxyUrl = proxyUrl;
+                _httpClient = HttpClientFactory.Create(proxyUrl, TimeSpan.FromSeconds(120));
+                old.Dispose();
+            }
         }
 
         public void Dispose()

@@ -17,8 +17,8 @@ namespace OpenCopilot.Providers
             "doubao-lite-128k"
         };
 
-        public DoubaoProvider(string apiKey, string model = "doubao-pro-32k")
-            : base(apiKey, model, "https://ark.cn-beijing.volces.com/api/v3")
+        public DoubaoProvider(string apiKey, string model = "doubao-pro-32k", string? proxyUrl = null)
+            : base(apiKey, model, "https://ark.cn-beijing.volces.com/api/v3", proxyUrl)
         {
         }
     }

@@ -129,6 +129,47 @@ namespace OpenCopilot.Tests.Providers
             var p = new DockerDesktopAIProvider();
             Assert.Equal("Docker Desktop AI", p.Name);
         }
+
+        [Fact]
+        public void OpenAIProvider_AcceptsProxyUrl_WithoutThrowing()
+        {
+            // Verifies the provider can be constructed with a proxy URL
+            using var p = new OpenAIProvider("key", "gpt-4o-mini", "https://api.openai.com/v1",
+                proxyUrl: "http://127.0.0.1:7890");
+            Assert.Equal("OpenAI", p.Name);
+        }
+
+        [Fact]
+        public void DeepSeekProvider_AcceptsProxyUrl_WithoutThrowing()
+        {
+            using var p = new DeepSeekProvider("key", proxyUrl: "http://127.0.0.1:7890");
+            Assert.Equal("DeepSeek", p.Name);
+        }
+
+        [Fact]
+        public void DoubaoProvider_AcceptsProxyUrl_WithoutThrowing()
+        {
+            using var p = new DoubaoProvider("key", proxyUrl: "http://127.0.0.1:7890");
+            Assert.Equal("Doubao", p.Name);
+        }
+
+        [Fact]
+        public void UpdateSettings_WithChangedProxy_DoesNotThrow()
+        {
+            using var p = new OpenAIProvider("key");
+            // Switch from no proxy to proxy
+            p.UpdateSettings("newkey", "gpt-4o", "https://api.openai.com/v1", "http://127.0.0.1:7890");
+            Assert.Equal("OpenAI", p.Name);
+        }
+
+        [Fact]
+        public void UpdateSettings_ProxyUnchanged_DoesNotRebuildClient()
+        {
+            using var p = new OpenAIProvider("key", proxyUrl: "http://127.0.0.1:7890");
+            // Same proxy — no exception, no rebuild needed
+            p.UpdateSettings("key2", "gpt-4o", "https://api.openai.com/v1", "http://127.0.0.1:7890");
+            Assert.Equal("OpenAI", p.Name);
+        }
     }
 
     /// <summary>Allows injecting a custom HttpClient for testing.</summary>

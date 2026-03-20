@@ -34,6 +34,16 @@ namespace OpenCopilot.Options
         public double Temperature { get; set; } = 0.2;
         public int MaxTokens { get; set; } = 512;
 
+        // ── Proxy ────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Route all cloud LLM API calls through a proxy (e.g. Clash, V2Ray).
+        /// Localhost providers (Ollama, Docker Desktop AI) are never proxied.
+        /// </summary>
+        public bool UseProxy { get; set; } = false;
+
+        /// <summary>HTTP proxy URL, e.g. <c>http://127.0.0.1:7890</c>.</summary>
+        public string ProxyUrl { get; set; } = "http://127.0.0.1:7890";
+
         // ── UI ───────────────────────────────────────────────────────────────
         public bool ShowStatusBarInfo { get; set; } = true;
     }
