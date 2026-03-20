@@ -1,6 +1,6 @@
 # OpenCopilot
 
-A GitHub Copilot-like AI coding assistant for **Visual Studio 2022**, supporting multiple LLM providers including cloud services and local offline models.
+A GitHub Copilot-like AI coding assistant for **Visual Studio 2022, 2025, and 2026**, supporting multiple LLM providers including cloud services and local offline models.
 
 ## Features
 
@@ -29,7 +29,7 @@ src/
     Providers/               # ILlmProvider + OpenAI, DeepSeek, Doubao, Ollama, DockerDesktopAI
     Services/                # LlmService (provider orchestrator + request builders)
     Options/                 # OpenCopilotOptions (settings model)
-  OpenCopilot/               # net472 VSIX — Visual Studio 2022 extension
+  OpenCopilot/               # net472 VSIX — Visual Studio 2022 / 2025 / 2026 extension
     OpenCopilotPackage.cs    # AsyncPackage entry point
     Completion/              # IAsyncCompletionSource for inline AI completions
     Commands/                # Explain / Generate / Fix code commands
@@ -41,8 +41,8 @@ src/
 ## Getting Started
 
 ### Prerequisites
-- Visual Studio 2022 (17.0+)
-- .NET Framework 4.7.2 (included with VS2022)
+- Visual Studio 2022 (17.0+), 2025 (18.0+), or 2026 (19.0+)
+- .NET Framework 4.7.2 (included with VS2022 and later)
 - Visual Studio SDK (for building from source)
 
 ### Building
