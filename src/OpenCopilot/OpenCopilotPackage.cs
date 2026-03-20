@@ -7,9 +7,11 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using OpenCopilot.Commands;
 using OpenCopilot.Completion;
+using OpenCopilot.Mcp;
 using OpenCopilot.Options;
 using OpenCopilot.Providers;
 using OpenCopilot.Services;
+using OpenCopilot.Skills;
 using OpenCopilot.ToolWindows;
 using Task = System.Threading.Tasks.Task;
 
@@ -44,6 +46,7 @@ namespace OpenCopilot
         public const string PackageGuidString = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
         private LlmService _llmService;
+        private McpService _mcpService;
         private OpenCopilotOptionsPage _optionsPage;
 
         #region Package initialisation
@@ -63,6 +66,21 @@ namespace OpenCopilot
 
             // Expose the service so other components can request it
             AddService(typeof(LlmService), (container, cancellation, type) => Task.FromResult<object>(_llmService), promote: true);
+
+            // Set up MCP service with built-in VS tools and discovered servers
+            _mcpService = new McpService();
+            new VsFileEditingTools(this).RegisterInto(_mcpService);
+
+            var discovery = new McpDiscovery();
+            var mcpConfigs = discovery.Discover(GetSolutionDirectory());
+            foreach (var config in mcpConfigs)
+            {
+                if (config.Transport == McpTransport.Stdio && !string.IsNullOrWhiteSpace(config.Command))
+                    _mcpService.AddClient(new McpStdioClient(config));
+            }
+
+            AddService(typeof(McpService), (container, cancellation, type) => Task.FromResult<object>(_mcpService), promote: true);
+            _ = ConnectMcpClientsAsync();
 
             // Make the service and options available to the MEF completion source
             CompletionSourceProvider.LlmServiceInstance = _llmService;
@@ -169,6 +187,39 @@ namespace OpenCopilot
 
             if (_llmService.GetProvider("Docker Desktop AI") is DockerDesktopAIProvider docker)
                 docker.UpdateSettings(string.Empty, options.DockerDesktopAIModel, options.DockerDesktopAIBaseUrl);
+        }
+
+        #endregion
+
+        #region MCP
+
+        private string? GetSolutionDirectory()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var dte = GetService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            var solutionPath = dte?.Solution?.FullName;
+            return string.IsNullOrWhiteSpace(solutionPath)
+                ? null
+                : System.IO.Path.GetDirectoryName(solutionPath);
+        }
+
+        private async Task ConnectMcpClientsAsync()
+        {
+            foreach (var client in _mcpService.Clients)
+            {
+                try
+                {
+                    await client.ConnectAsync(DisposalToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    ActivityLog.LogWarning(
+                        nameof(OpenCopilotPackage),
+                        $"Failed to connect MCP client '{client.ServerName}': {ex.Message}");
+                }
+            }
+
+            _mcpService.InvalidateToolCache();
         }
 
         #endregion
