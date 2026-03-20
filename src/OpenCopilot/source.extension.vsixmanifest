@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Id="OpenCopilot.VisualStudio" Version="1.0.0" Language="en-US" Publisher="OpenCopilot" />
+    <DisplayName>OpenCopilot</DisplayName>
+    <Description xml:space="preserve">An AI-powered coding assistant for Visual Studio supporting OpenAI, DeepSeek, Doubao, Ollama, and Docker Desktop AI providers.</Description>
+    <MoreInfo>https://github.com/OpenCopilot/OpenCopilot</MoreInfo>
+    <License>LICENSE</License>
+    <Icon>Resources\logo.png</Icon>
+    <PreviewImage>Resources\logo.png</PreviewImage>
+    <Tags>AI, Copilot, Code Completion, OpenAI, DeepSeek, Ollama</Tags>
+    <GettingStartedGuide>https://github.com/OpenCopilot/OpenCopilot</GettingStartedGuide>
+    <ReleaseNotes>Initial release of OpenCopilot for Visual Studio 2022.</ReleaseNotes>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName=".NET Framework" Version="[4.7.2,)" />
+    <Dependency Id="Microsoft.VisualStudio.MPF.17.0" DisplayName="Visual Studio MPF 17.0" d:Source="Installed" Version="[17.0,18.0)" />
+  </Dependencies>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+    <Asset Type="Microsoft.VisualStudio.MefComponent" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%|" />
+  </Assets>
+</PackageManifest>
