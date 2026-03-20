@@ -24,21 +24,6 @@ namespace OpenCopilot.ToolWindows
         // Keeping this bounded avoids exceeding context-window limits.
         private const int MaxHistoryMessages = 20;
 
-        // Cached references to named XAML elements (populated after InitializeComponent)
-        private TextBlock? _statusLabel;
-        private ScrollViewer? _chatScrollViewer;
-        private ItemsControl? _messageList;
-        private Border? _typingIndicator;
-        private TextBox? _inputBox;
-        private Button? _sendButton;
-
-        private TextBlock StatusLabel => _statusLabel ??= (TextBlock)FindName("StatusLabel");
-        private ScrollViewer ChatScrollViewer => _chatScrollViewer ??= (ScrollViewer)FindName("ChatScrollViewer");
-        private ItemsControl MessageList => _messageList ??= (ItemsControl)FindName("MessageList");
-        private Border TypingIndicator => _typingIndicator ??= (Border)FindName("TypingIndicator");
-        private TextBox InputBox => _inputBox ??= (TextBox)FindName("InputBox");
-        private Button SendButton => _sendButton ??= (Button)FindName("SendButton");
-
         public CopilotChatWindowControl()
         {
             InitializeComponent();
@@ -54,8 +39,9 @@ namespace OpenCopilot.ToolWindows
 
         public void UpdateStatus(string? providerName, string? modelName)
         {
-            Dispatcher.Invoke(() =>
+            ThreadHelper.JoinableTaskFactory.Run(async () =>
             {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 StatusLabel.Text = string.IsNullOrWhiteSpace(providerName)
                     ? "OpenCopilot · No provider configured"
                     : $"OpenCopilot · {providerName} / {modelName}";
@@ -65,8 +51,9 @@ namespace OpenCopilot.ToolWindows
         /// <summary>Programmatically add a message (used by commands).</summary>
         public void AddMessage(string sender, string content)
         {
-            Dispatcher.Invoke(() =>
+            ThreadHelper.JoinableTaskFactory.Run(async () =>
             {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 _messages.Add(new ChatMessage(sender, content));
                 ChatScrollViewer.ScrollToBottom();
             });
@@ -116,8 +103,9 @@ namespace OpenCopilot.ToolWindows
 
                 var response = await _llmService.CompleteAsync(request, _cts.Token).ConfigureAwait(false);
 
-                await Dispatcher.InvokeAsync(() =>
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     TypingIndicator.Visibility = Visibility.Collapsed;
                     if (response.IsSuccess)
                         _messages.Add(new ChatMessage("OpenCopilot", response.Content));
@@ -129,24 +117,27 @@ namespace OpenCopilot.ToolWindows
             }
             catch (OperationCanceledException)
             {
-                await Dispatcher.InvokeAsync(() =>
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     TypingIndicator.Visibility = Visibility.Collapsed;
                     _messages.Add(new ChatMessage("OpenCopilot", "Request cancelled."));
                 });
             }
             catch (Exception ex)
             {
-                await Dispatcher.InvokeAsync(() =>
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     TypingIndicator.Visibility = Visibility.Collapsed;
                     _messages.Add(new ChatMessage("OpenCopilot", $"⚠ Unexpected error: {ex.Message}"));
                 });
             }
             finally
             {
-                await Dispatcher.InvokeAsync(() =>
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     InputBox.IsEnabled = true;
                     SendButton.IsEnabled = true;
                     InputBox.Focus();
@@ -179,26 +170,11 @@ namespace OpenCopilot.ToolWindows
 
         public HorizontalAlignment SenderAlignment => IsUser ? HorizontalAlignment.Right : HorizontalAlignment.Left;
         public HorizontalAlignment BubbleAlignment => IsUser ? HorizontalAlignment.Right : HorizontalAlignment.Left;
-
-        public Brush BubbleBackground => IsUser
-            ? new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4))
-            : new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30));
-
-        public Brush TextForeground => IsUser
-            ? Brushes.White
-            : new SolidColorBrush(Color.FromRgb(0xD4, 0xD4, 0xD4));
-
-        public CornerRadius BubbleCornerRadius => IsUser
-            ? new CornerRadius(8, 8, 2, 8)
-            : new CornerRadius(8, 8, 8, 2);
-
-        public Thickness BubbleMargin => IsUser
-            ? new Thickness(40, 3, 8, 3)
-            : new Thickness(8, 3, 40, 3);
-
-        public FontFamily TextFont => IsUser
-            ? new FontFamily("Segoe UI")
-            : new FontFamily("Consolas, Courier New");
+        public Brush BubbleBackground => IsUser ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0078D4")) : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2D2D30"));
+        public CornerRadius BubbleCornerRadius => IsUser ? new CornerRadius(8, 8, 2, 8) : new CornerRadius(8, 8, 8, 2);
+        public Thickness BubbleMargin => IsUser ? new Thickness(40, 4, 8, 4) : new Thickness(8, 4, 40, 4);
+        public Brush TextForeground => IsUser ? Brushes.White : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D4D4D4"));
+        public FontFamily TextFont => IsUser ? SystemFonts.MessageFontFamily : new FontFamily("Consolas, Courier New, monospace");
 
         public ChatMessage(string sender, string content)
         {

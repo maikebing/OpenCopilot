@@ -67,7 +67,7 @@ namespace OpenCopilot.Completion
                 if (!response.IsSuccess || string.IsNullOrWhiteSpace(response.Content))
                     return CompletionContext.Empty;
 
-                var suggestion = response.Content.Trim();
+                var suggestion = response.Content.Trim().ToString();
                 var item = new CompletionItem(
                     displayText: TruncateForDisplay(suggestion),
                     source: this,

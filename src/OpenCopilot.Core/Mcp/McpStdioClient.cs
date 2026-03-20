@@ -46,8 +46,7 @@ namespace OpenCopilot.Mcp
                     RedirectStandardInput = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    StandardOutputEncoding = Encoding.UTF8,
-                    StandardInputEncoding = Encoding.UTF8
+                    StandardOutputEncoding = Encoding.UTF8
                 };
 
                 foreach (var arg in _config.Args)
@@ -279,7 +278,7 @@ namespace OpenCopilot.Mcp
 
         private static string EscapeArg(string arg)
         {
-            if (!arg.Contains(' ') && !arg.Contains('"'))
+            if (!arg.Contains(" ") && !arg.Contains("\""))
                 return arg;
             return "\"" + arg.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
         }

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net472</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
     <AssemblyName>OpenCopilot</AssemblyName>
     <RootNamespace>OpenCopilot</RootNamespace>
     <UseWPF>true</UseWPF>
@@ -46,13 +46,6 @@
 
   <ItemGroup>
     <Resource Include="Resources\logo.png" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Page Include="ToolWindows\CopilotChatWindowControl.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
   </ItemGroup>
 
 </Project>

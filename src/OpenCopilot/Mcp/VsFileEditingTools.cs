@@ -13,7 +13,7 @@ namespace OpenCopilot.Mcp
 {
     /// <summary>
     /// Registers built-in VS IDE file editing tools into an <see cref="McpService"/>.
-    /// All tools use only System.IO and VS IDE APIs â€” no external processes.
+    /// All tools use only System.IO and VS IDE APIs â€?no external processes.
     /// </summary>
     public class VsFileEditingTools
     {
@@ -273,7 +273,7 @@ namespace OpenCopilot.Mcp
 
                 if (updatedText == fullText) return false;
 
-                buffer.ReplaceLines(0, 0, lastLine, lastCol, updatedText, updatedText.Length, new TextSpan[1]);
+                var pUpdatedText = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUni(updatedText); try { buffer.ReplaceLines(0, 0, lastLine, lastCol, pUpdatedText, updatedText.Length, new TextSpan[1]); } finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pUpdatedText); }
                 return true;
             }
             catch
@@ -297,7 +297,7 @@ namespace OpenCopilot.Mcp
                 if (buffer == null) return false;
 
                 buffer.GetLastLineIndex(out var lastLine, out var lastCol);
-                buffer.ReplaceLines(0, 0, lastLine, lastCol, content, content.Length, new TextSpan[1]);
+                var pContent = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUni(content); try { buffer.ReplaceLines(0, 0, lastLine, lastCol, pContent, content.Length, new TextSpan[1]); } finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pContent); }
                 return true;
             }
             catch
