@@ -5,12 +5,9 @@
     <DisplayName>OpenCopilot</DisplayName>
     <Description xml:space="preserve">An AI-powered coding assistant for Visual Studio supporting OpenAI, DeepSeek, Doubao, Ollama, and Docker Desktop AI providers.</Description>
     <MoreInfo>https://github.com/OpenCopilot/OpenCopilot</MoreInfo>
-    <License>LICENSE</License>
     <Icon>Resources\logo.png</Icon>
     <PreviewImage>Resources\logo.png</PreviewImage>
     <Tags>AI, Copilot, Code Completion, OpenAI, DeepSeek, Ollama</Tags>
-    <GettingStartedGuide>https://github.com/OpenCopilot/OpenCopilot</GettingStartedGuide>
-    <ReleaseNotes>OpenCopilot now supports Visual Studio 2022, 2025, and 2026.</ReleaseNotes>
   </Metadata>
   <Installation>
     <!-- Visual Studio 2022 (17.x) -->
@@ -44,6 +41,9 @@
       <ProductArchitecture>amd64</ProductArchitecture>
     </InstallationTarget>
   </Installation>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
   <Dependencies>
     <Dependency Id="Microsoft.Framework.NDP" DisplayName=".NET Framework" Version="[4.7.2,)" />
     <!-- Minimum MPF version only; no upper bound so the extension works on VS2022, 2025, and 2026 -->

@@ -23,11 +23,7 @@ namespace OpenCopilot
     /// </summary>
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
     [Guid(PackageGuidString)]
-    [InstalledProductRegistration(
-        "#110",
-        "#112",
-        "1.0",
-        IconResourceID = 400)]
+    [InstalledProductRegistration("#110", "#112", "1.0")]
     [ProvideMenuResource("Menus.ctmenu", 1)]
     [ProvideToolWindow(
         typeof(CopilotChatWindow),
@@ -57,6 +53,9 @@ namespace OpenCopilot
         {
             await base.InitializeAsync(cancellationToken, progress);
 
+            // GetDialogPage and several VS services require UI thread access.
+            await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
             // Load the options page
             _optionsPage = (OpenCopilotOptionsPage)GetDialogPage(typeof(OpenCopilotOptionsPage));
             var options = _optionsPage.GetOptions();
@@ -83,7 +82,8 @@ namespace OpenCopilot
             _mcpService.SetDisabledServers(ParseDisabledServers(options.DisabledMcpServers));
 
             var discovery = new McpDiscovery();
-            var mcpConfigs = discovery.Discover(GetSolutionDirectory());
+            var solutionDirectory = await GetSolutionDirectoryAsync(cancellationToken);
+            var mcpConfigs = discovery.Discover(solutionDirectory);
             foreach (var config in mcpConfigs)
             {
                 if (config.Transport == McpTransport.Stdio && !string.IsNullOrWhiteSpace(config.Command))
@@ -103,6 +103,7 @@ namespace OpenCopilot
             await ExplainCodeCommand.InitializeAsync(this, _llmService);
             await GenerateCodeCommand.InitializeAsync(this, _llmService);
             await FixCodeCommand.InitializeAsync(this, _llmService);
+            await OpenChatWindowCommand.InitializeAsync(this);
 
             // Update status bar
             if (options.ShowStatusBarInfo)
@@ -236,10 +237,10 @@ namespace OpenCopilot
             }
         }
 
-        private string? GetSolutionDirectory()
+        private async Task<string?> GetSolutionDirectoryAsync(CancellationToken cancellationToken)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            var dte = GetService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            var dte = await GetServiceAsync(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
             var solutionPath = dte?.Solution?.FullName;
             return string.IsNullOrWhiteSpace(solutionPath)
                 ? null

@@ -1,36 +1,39 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <AssemblyName>OpenCopilot</AssemblyName>
     <RootNamespace>OpenCopilot</RootNamespace>
     <UseWPF>true</UseWPF>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
     <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
     <IncludeDebugSymbolsInVSIXContainer>true</IncludeDebugSymbolsInVSIXContainer>
     <IncludeDebugSymbolsInLocalVSIXDeployment>true</IncludeDebugSymbolsInLocalVSIXDeployment>
     <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
     <CopyOutputSymbolsToOutputDirectory>true</CopyOutputSymbolsToOutputDirectory>
+    <ClientEnabledPkgOutputDirectory>$(MSBuildProjectDirectory)\$(OutputPath)</ClientEnabledPkgOutputDirectory>
+    <TemplateOutputDirectory>$(MSBuildProjectDirectory)\$(OutputPath)</TemplateOutputDirectory>
+    <VSIXIdentifier>OpenCopilot.VisualStudio</VSIXIdentifier>
+    <TargetVsixContainerName>OpenCopilot.vsix</TargetVsixContainerName>
     <StartAction>Program</StartAction>
     <StartProgram>$(DevEnvDir)devenv.exe</StartProgram>
     <StartArguments>/rootsuffix Exp</StartArguments>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <UseCodebase>true</UseCodebase>
+    <RootOutputDirectory>$(MSBuildProjectDirectory)\$(OutputPath)</RootOutputDirectory>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.0.31902.203" ExcludeAssets="runtime" />
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.0.5232" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.0.5232" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.VisualStudio.Language.Intellisense" Version="17.0.31902.203" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- WPF assemblies are included via UseWPF=true -->
-    <!-- System.Design needed for OleMenuCommandService -->
     <Reference Include="System.Design" />
-    <!-- MEF for CompletionSourceProvider -->
     <Reference Include="System.ComponentModel.Composition" />
-    <!-- WinForms for GenerateCodeCommand input dialog -->
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 
@@ -39,13 +42,86 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Page Include="ToolWindows\CopilotChatWindowControl.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <None Include="source.extension.vsixmanifest">
       <SubType>Designer</SubType>
     </None>
+    <None Include="..\..\LICENSE">
+      <Link>LICENSE</Link>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </None>
+    <VSCTCompile Include="OpenCopilot.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+    <EmbeddedResource Update="VSPackage.resx">
+      <MergeWithCTO>true</MergeWithCTO>
+      <ManifestResourceName>VSPackage</ManifestResourceName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>
     <Resource Include="Resources\logo.png" />
   </ItemGroup>
+
+  <Import Project="$(PkgMicrosoft_VSSDK_BuildTools)\tools\VSSDK\Microsoft.VsSDK.targets" Condition="'$(PkgMicrosoft_VSSDK_BuildTools)' != '' and Exists('$(PkgMicrosoft_VSSDK_BuildTools)\tools\VSSDK\Microsoft.VsSDK.targets')" />
+
+  <!-- $(TargetPath) is not available at property-evaluation time in SDK-style projects,
+       so GeneratePkgDef is skipped because its Inputs are empty.  Re-define the target
+       with the same body but resolve $(TargetPath) through DependsOnTargets="Compile". -->
+  <Target Name="GeneratePkgDef"
+          Condition="'$(GeneratePkgDefFile)'=='true'"
+          DependsOnTargets="$(GeneratePkgDefDependsOn)"
+          Outputs="$(IntermediateOutputPath)$(TargetName).pkgdef">
+
+    <Message Text="Creating intermediate PkgDef file from $(TargetPath)." />
+
+    <ItemGroup>
+      <CreatePkgDefReferencedAssemblies Include="@(ReferenceCopyLocalPaths)" />
+      <CreatePkgDefReferencedAssemblies Include="@(ReferencePath)" />
+    </ItemGroup>
+
+    <CreatePkgDef AssemblyToProcess="$(TargetPath)"
+                  ProductVersion="$(TargetVSVersion)"
+                  OutputFile="$(IntermediateOutputPath)$(TargetName).latest.pkgdef"
+                  UseCodebase="$(UseCodebase)"
+                  ReferencedAssemblies="@(CreatePkgDefReferencedAssemblies)"
+                  Is64BitBuild="$(Is64BitBuild)" />
+
+    <CopyIfChanged Condition="Exists('$(IntermediateOutputPath)$(TargetName).latest.pkgdef')"
+                   SourceFile="$(IntermediateOutputPath)$(TargetName).latest.pkgdef"
+                   DestinationFile="$(IntermediateOutputPath)$(TargetName).pkgdef" />
+
+    <Touch Files="$(IntermediateOutputPath)$(TargetName).pkgdef"
+           Condition="'$(CTOFileHasChanged)'=='true' AND Exists('$(IntermediateOutputPath)$(TargetName).pkgdef')" />
+
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)$(TargetName).pkgdef" Condition="Exists('$(IntermediateOutputPath)$(TargetName).pkgdef')" />
+      <FileWrites Include="$(IntermediateOutputPath)$(TargetName).latest.pkgdef" Condition="Exists('$(IntermediateOutputPath)$(TargetName).latest.pkgdef')" />
+    </ItemGroup>
+  </Target>
+
+  <!-- SDK-style projects: Sdk.targets overwrites PrepareForRunDependsOn, dropping
+       the VSSDK additions (GeneratePkgDef, CreateVsixContainer, DeployVsixExtensionFiles).
+       Re-chain them after CopyFilesToOutputDirectory so the VSIX is created and deployed. -->
+  <Target Name="VssdkAfterBuild"
+          AfterTargets="CopyFilesToOutputDirectory"
+          DependsOnTargets="GeneratePkgDef;CopyPkgDef;CreateVsixContainer;DeployVsixExtensionFiles;CopyVsixManifestFile" />
+
+  <!-- SDK-style projects: NuGetSourceType metadata is often empty on
+       ReferenceCopyLocalPaths, so the VSSDK ResolvePackageReferences task
+       fails to include transitive NuGet dependencies (Newtonsoft.Json, etc.).
+       Manually add CopyLocal DLLs that aren't already in the VSIX. -->
+  <Target Name="IncludeCopyLocalInVsix" BeforeTargets="GetVsixSourceItems">
+    <ItemGroup>
+      <VSIXSourceItem Include="@(ReferenceCopyLocalPaths)"
+                      Condition="'%(Extension)' == '.dll' and '%(ReferenceCopyLocalPaths.IncludeInVSIX)' != 'false'">
+        <VSIXSubPath>$(AssemblyVSIXSubPath)</VSIXSubPath>
+        <InstallRoot>$(InstallRoot)</InstallRoot>
+      </VSIXSourceItem>
+    </ItemGroup>
+  </Target>
 
 </Project>
