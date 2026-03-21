@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -103,10 +104,38 @@ namespace OpenCopilot.Tests.Providers
         }
 
         [Fact]
-        public void AvailableModels_ContainsGpt4o()
+        public void AvailableModels_ContainsConfiguredModel()
         {
-            var provider = new OpenAIProvider("key");
-            Assert.Contains("gpt-4o", provider.AvailableModels);
+            var provider = new OpenAIProvider("key", "gpt-4o-mini");
+            Assert.Contains("gpt-4o-mini", provider.AvailableModels);
+        }
+
+        [Fact]
+        public async Task GetAvailableModelsAsync_ReturnsProtocolModels_WhenEndpointReturnsData()
+        {
+            var mock = new MockHttpMessageHandler();
+            mock.When("https://api.openai.com/v1/models")
+                .Respond("application/json", "{\"data\":[{\"id\":\"gpt-4.1\"},{\"id\":\"gpt-4o-mini\"}]}");
+
+            var provider = new TestableOpenAIProvider("test-key", "gpt-4o-mini", "https://api.openai.com/v1", mock.ToHttpClient());
+
+            var models = await provider.GetAvailableModelsAsync(CancellationToken.None);
+
+            Assert.Contains("gpt-4.1", models);
+        }
+
+        [Fact]
+        public async Task GetAvailableModelsAsync_FiltersUnsupportedContentTypeModels()
+        {
+            var mock = new MockHttpMessageHandler();
+            mock.When("https://api.openai.com/v1/models")
+                .Respond("application/json", "{\"data\":[{\"id\":\"text-embedding-3-large\"},{\"id\":\"omni-moderation-latest\"},{\"id\":\"gpt-4o-mini\"}]}");
+
+            var provider = new TestableOpenAIProvider("test-key", "gpt-4o-mini", "https://api.openai.com/v1", mock.ToHttpClient());
+
+            var models = await provider.GetAvailableModelsAsync(CancellationToken.None);
+
+            Assert.Equal(new[] { "gpt-4o-mini" }, models);
         }
 
         [Fact]
@@ -181,6 +210,22 @@ namespace OpenCopilot.Tests.Providers
             : base(apiKey, model, baseUrl)
         {
             _injectedClient = httpClient;
+        }
+
+        public override async Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken cancellationToken = default)
+        {
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.openai.com/v1/models");
+            SetAuthHeader(httpRequest);
+
+            var response = await _injectedClient.SendAsync(httpRequest, cancellationToken);
+            var json = await response.Content.ReadAsStringAsync();
+            var payload = Newtonsoft.Json.Linq.JObject.Parse(json);
+
+            return payload["data"]
+                ?.Children<Newtonsoft.Json.Linq.JObject>()
+                .Select(item => item["id"]?.ToString()) is IEnumerable<string?> ids
+                ? NormalizeModelCatalog(ids)
+                : System.Array.Empty<string>();
         }
 
         // Override CompleteAsync to use the injected client

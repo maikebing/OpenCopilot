@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -109,6 +110,8 @@ namespace OpenCopilot
             if (options.ShowStatusBarInfo)
                 await UpdateStatusBarAsync(options);
 
+            await RefreshChatWindowProviderConfigurationAsync(options);
+
             // Wire up options-changed notification
             _optionsPage.SettingsChanged += OnSettingsChanged;
         }
@@ -141,12 +144,31 @@ namespace OpenCopilot
 
         private void ApplyActiveProvider(OpenCopilotOptions options)
         {
-            if (!_llmService.TrySetActiveProvider(options.ActiveProvider))
-            {
-                // Fall back to the first registered provider
-                if (_llmService.Providers.Count > 0)
-                    _llmService.ActiveProvider = _llmService.Providers[0];
-            }
+            var configuredProviders = GetConfiguredProviders(options);
+            if (configuredProviders.Count > 0 && _llmService.TrySetActiveProvider(configuredProviders[0].Name))
+                return;
+
+            if (_llmService.Providers.Count > 0)
+                _llmService.ActiveProvider = _llmService.Providers[0];
+        }
+
+        internal IReadOnlyList<ConfiguredProviderDefinition> GetConfiguredProviders()
+            => GetConfiguredProviders(_optionsPage.GetOptions());
+
+        internal async Task ShowOptionsPageAsync()
+        {
+            await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
+            ShowOptionPage(typeof(OpenCopilotOptionsPage));
+        }
+
+        internal async Task NotifyProviderSelectionChangedAsync(string? providerName, string? modelName)
+        {
+            var options = _optionsPage.GetOptions();
+            if (!string.IsNullOrWhiteSpace(providerName))
+                _llmService.TrySetActiveProvider(providerName);
+
+            if (options.ShowStatusBarInfo)
+                await UpdateStatusBarAsync(options, providerName, modelName).ConfigureAwait(false);
         }
 
         #endregion
@@ -165,9 +187,9 @@ namespace OpenCopilot
 
                 if (window.Content is CopilotChatWindowControl control)
                 {
-                    var provider = _llmService.ActiveProvider;
+                    var options = _optionsPage.GetOptions();
                     var solutionDirectory = await GetSolutionDirectoryAsync(DisposalToken);
-                    await control.InitializeAsync(_llmService, provider?.Name, GetActiveModel(), solutionDirectory);
+                    await control.InitializeAsync(this, _llmService, GetConfiguredProviders(options), _llmService.ActiveProvider?.Name, GetActiveModel(options), solutionDirectory);
                 }
             }
         }
@@ -200,6 +222,8 @@ namespace OpenCopilot
 
             if (options.ShowStatusBarInfo)
                 _ = UpdateStatusBarAsync(options);
+
+            _ = RefreshChatWindowProviderConfigurationAsync(options);
         }
 
         private void UpdateProviderSettings(OpenCopilotOptions options)
@@ -272,6 +296,9 @@ namespace OpenCopilot
         #region Status bar
 
         private async Task UpdateStatusBarAsync(OpenCopilotOptions options)
+            => await UpdateStatusBarAsync(options, _llmService.ActiveProvider?.Name, GetActiveModel(options)).ConfigureAwait(false);
+
+        private async Task UpdateStatusBarAsync(OpenCopilotOptions options, string? providerName, string? modelName)
         {
             await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
             var statusBar = await GetServiceAsync(typeof(SVsStatusbar)) as IVsStatusbar;
@@ -280,26 +307,41 @@ namespace OpenCopilot
             statusBar.IsFrozen(out var frozen);
             if (frozen != 0) statusBar.FreezeOutput(0);
 
-            var provider = _llmService.ActiveProvider;
-            var text = provider != null
-                ? $"OpenCopilot: {provider.Name} / {GetActiveModel()}"
+            var text = !string.IsNullOrWhiteSpace(providerName)
+                ? $"OpenCopilot: {providerName} / {modelName}"
                 : "OpenCopilot: inactive";
 
             statusBar.SetText(text);
         }
 
-        private string GetActiveModel()
+        private string GetActiveModel(OpenCopilotOptions options)
         {
-            var options = _optionsPage.GetOptions();
-            return _llmService.ActiveProvider?.Name switch
+            var activeProviderName = _llmService.ActiveProvider?.Name;
+            var configuredModel = ProviderConfigurationCatalog.GetPreferredModel(options, activeProviderName ?? string.Empty);
+            return !string.IsNullOrWhiteSpace(configuredModel)
+                ? configuredModel
+                : "unknown";
+        }
+
+        private IReadOnlyList<ConfiguredProviderDefinition> GetConfiguredProviders(OpenCopilotOptions options)
+            => new ReadOnlyCollection<ConfiguredProviderDefinition>(new List<ConfiguredProviderDefinition>(ProviderConfigurationCatalog.GetConfiguredProviders(options, _llmService.Providers)));
+
+        private async Task RefreshChatWindowProviderConfigurationAsync(OpenCopilotOptions options)
+        {
+            await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
+            var window = await FindToolWindowAsync(typeof(CopilotChatWindow), 0, false, DisposalToken) as CopilotChatWindow;
+            if (window?.Content is CopilotChatWindowControl control)
             {
-                "OpenAI" => options.OpenAIModel,
-                "DeepSeek" => options.DeepSeekModel,
-                "Doubao" => options.DoubaoModel,
-                "Ollama" => options.OllamaModel,
-                "Docker Desktop AI" => options.DockerDesktopAIModel,
-                _ => "unknown"
-            };
+                var configuredProviders = GetConfiguredProviders(options);
+                var activeProviderName = _llmService.ActiveProvider?.Name;
+                var activeModelName = GetActiveModel(options);
+                var solutionDirectory = await GetSolutionDirectoryAsync(DisposalToken);
+
+                if (!control.IsInitialized)
+                    await control.InitializeAsync(this, _llmService, configuredProviders, activeProviderName, activeModelName, solutionDirectory).ConfigureAwait(true);
+                else
+                    await control.RefreshProviderConfigurationAsync(configuredProviders, activeProviderName, activeModelName).ConfigureAwait(true);
+            }
         }
 
         #endregion

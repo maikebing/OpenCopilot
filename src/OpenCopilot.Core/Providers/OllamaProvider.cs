@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -24,10 +25,11 @@ namespace OpenCopilot.Providers
 
         // Ollama runs locally and may take longer than cloud APIs for large models.
         private const int RequestTimeoutSeconds = 60;
+        private const int ModelDiscoveryTimeoutSeconds = 10;
 
         public string Name => "Ollama";
 
-        private string[] _availableModels = new[] { "codellama", "llama3", "mistral", "phi3", "gemma2" };
+        private string[] _availableModels;
         public string[] AvailableModels => _availableModels;
 
         /// <param name="baseUrl">Ollama server URL (default <c>http://localhost:11434</c>).</param>
@@ -43,7 +45,44 @@ namespace OpenCopilot.Providers
             _baseUrl = baseUrl.TrimEnd('/');
             _model = model;
             _proxyUrl = proxyUrl;
+            _availableModels = CreateFallbackModels(model);
             _httpClient = HttpClientFactory.Create(proxyUrl, TimeSpan.FromSeconds(120));
+        }
+
+        public virtual async Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(ModelDiscoveryTimeoutSeconds));
+
+                var response = await _httpClient.GetAsync($"{_baseUrl}/api/tags", cts.Token).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                    return AvailableModels;
+
+                var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var payload = JObject.Parse(json);
+                var discoveredModels = payload["models"]
+                    ?.Children<JObject>()
+                    .Select(item => item["name"]?.ToString())
+                    .Where(modelName => !string.IsNullOrWhiteSpace(modelName))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                if (discoveredModels != null && discoveredModels.Length > 0)
+                    _availableModels = discoveredModels;
+            }
+            catch (HttpRequestException)
+            {
+            }
+            catch (JsonException)
+            {
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            return AvailableModels;
         }
 
         public virtual async Task<LlmResponse> CompleteAsync(LlmRequest request, CancellationToken cancellationToken = default)
@@ -130,29 +169,8 @@ namespace OpenCopilot.Providers
         {
             try
             {
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(5));
-
-                var response = await _httpClient.GetAsync($"{_baseUrl}/api/tags", cts.Token).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode) return false;
-
-                // Refresh available models from running Ollama instance
-                var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                var obj = JObject.Parse(json);
-                var models = obj["models"] as JArray;
-                if (models != null && models.Count > 0)
-                {
-                    var names = new List<string>();
-                    foreach (var m in models)
-                    {
-                        var name = m["name"]?.ToString();
-                        if (!string.IsNullOrEmpty(name))
-                            names.Add(name);
-                    }
-                    if (names.Count > 0)
-                        _availableModels = names.ToArray();
-                }
-                return true;
+                var models = await GetAvailableModelsAsync(cancellationToken).ConfigureAwait(false);
+                return models.Count > 0;
             }
             catch
             {
@@ -187,6 +205,7 @@ namespace OpenCopilot.Providers
         {
             _baseUrl = baseUrl.TrimEnd('/');
             _model = model;
+            _availableModels = CreateFallbackModels(model);
 
             if (proxyUrl != _proxyUrl)
             {
@@ -195,6 +214,13 @@ namespace OpenCopilot.Providers
                 _httpClient = HttpClientFactory.Create(proxyUrl, TimeSpan.FromSeconds(120));
                 old.Dispose();
             }
+        }
+
+        private static string[] CreateFallbackModels(string model)
+        {
+            return string.IsNullOrWhiteSpace(model)
+                ? Array.Empty<string>()
+                : new[] { model };
         }
 
         public void Dispose()

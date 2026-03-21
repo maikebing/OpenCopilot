@@ -11,25 +11,13 @@ namespace OpenCopilot.Options
     {
         private OpenCopilotOptions _options = new OpenCopilotOptions();
 
-        /// <summary>Raised after the user clicks OK in Tools > Options.</summary>
+        /// <summary>Raised after the user applies settings in Tools &gt; Options.</summary>
         public event EventHandler SettingsChanged;
 
         protected override void OnApply(PageApplyEventArgs e)
         {
             base.OnApply(e);
-            if (e.ApplyBehavior == ApplyKind.Apply)
-                SettingsChanged?.Invoke(this, EventArgs.Empty);
-        }
-
-        // ── Active provider ──────────────────────────────────────────────────
-
-        [Category("General")]
-        [DisplayName("Active Provider")]
-        [Description("The LLM provider to use for all AI features. Options: OpenAI, DeepSeek, Doubao, Ollama, Docker Desktop AI")]
-        public string ActiveProvider
-        {
-            get => _options.ActiveProvider;
-            set => _options.ActiveProvider = value;
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         }
 
         [Category("General")]
@@ -241,7 +229,6 @@ namespace OpenCopilot.Options
         /// <summary>Returns a snapshot of the current settings.</summary>
         public OpenCopilotOptions GetOptions() => new OpenCopilotOptions
         {
-            ActiveProvider = ActiveProvider,
             EnableInlineCompletion = EnableInlineCompletion,
             Temperature = Temperature,
             MaxTokens = MaxTokens,

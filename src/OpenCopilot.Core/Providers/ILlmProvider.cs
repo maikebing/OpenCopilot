@@ -11,6 +11,7 @@ namespace OpenCopilot.Providers
     {
         string Name { get; }
         string[] AvailableModels { get; }
+        Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken cancellationToken = default);
 
         Task<LlmResponse> CompleteAsync(LlmRequest request, CancellationToken cancellationToken = default);
         Task<IAsyncEnumerable<string>> StreamCompleteAsync(LlmRequest request, CancellationToken cancellationToken = default);

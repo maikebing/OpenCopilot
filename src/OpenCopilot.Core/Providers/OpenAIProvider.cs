@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -21,6 +22,7 @@ namespace OpenCopilot.Providers
         private string _apiKey;
         private string _model;
         private string? _proxyUrl;
+        private string[] _availableModels;
         private bool _disposed;
 
         // Per-request cancellation timeout for non-streaming calls.
@@ -28,14 +30,7 @@ namespace OpenCopilot.Providers
 
         public virtual string Name => "OpenAI";
 
-        public virtual string[] AvailableModels => new[]
-        {
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4-turbo",
-            "gpt-4",
-            "gpt-3.5-turbo"
-        };
+        public virtual string[] AvailableModels => _availableModels;
 
         public OpenAIProvider(string apiKey, string model = "gpt-4o-mini",
             string baseUrl = "https://api.openai.com/v1", string? proxyUrl = null)
@@ -44,7 +39,46 @@ namespace OpenCopilot.Providers
             _model = model;
             _baseUrl = baseUrl.TrimEnd('/');
             _proxyUrl = proxyUrl;
+            _availableModels = CreateFallbackModels(model);
             _httpClient = HttpClientFactory.Create(proxyUrl, TimeSpan.FromSeconds(120));
+        }
+
+        public virtual async Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/models");
+                SetAuthHeader(request);
+
+                using var response = await _httpClient.SendAsync(request, cts.Token).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                    return AvailableModels;
+
+                var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var payload = JObject.Parse(json);
+                var discoveredModels = NormalizeModelCatalog(
+                    payload["data"]
+                        ?.Children<JObject>()
+                        .Select(item => item["id"]?.ToString())
+                    ?? Enumerable.Empty<string?>());
+
+                if (discoveredModels.Length > 0)
+                    _availableModels = discoveredModels;
+            }
+            catch (HttpRequestException)
+            {
+            }
+            catch (JsonException)
+            {
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            return AvailableModels;
         }
 
         public virtual async Task<LlmResponse> CompleteAsync(LlmRequest request, CancellationToken cancellationToken = default)
@@ -193,6 +227,19 @@ namespace OpenCopilot.Providers
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         }
 
+        protected string[] NormalizeModelCatalog(IEnumerable<string?> modelNames)
+        {
+            if (modelNames == null)
+                throw new ArgumentNullException(nameof(modelNames));
+
+            return modelNames
+                .Where(modelName => !string.IsNullOrWhiteSpace(modelName))
+                .Select(modelName => modelName!.Trim())
+                .Where(IsChatCompatibleModel)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
         /// <summary>
         /// Updates provider settings at runtime.
         /// When <paramref name="proxyUrl"/> changes the internal <see cref="HttpClient"/> is
@@ -203,6 +250,7 @@ namespace OpenCopilot.Providers
             _apiKey = apiKey;
             _model = model;
             _baseUrl = baseUrl.TrimEnd('/');
+            _availableModels = CreateFallbackModels(model);
 
             if (proxyUrl != _proxyUrl)
             {
@@ -211,6 +259,29 @@ namespace OpenCopilot.Providers
                 _httpClient = HttpClientFactory.Create(proxyUrl, TimeSpan.FromSeconds(120));
                 old.Dispose();
             }
+        }
+
+        private static string[] CreateFallbackModels(string model)
+        {
+            return string.IsNullOrWhiteSpace(model)
+                ? Array.Empty<string>()
+                : new[] { model };
+        }
+
+        private static bool IsChatCompatibleModel(string modelName)
+        {
+            var normalized = modelName.Trim();
+            if (normalized.Length == 0)
+                return false;
+
+            var lowered = normalized.ToLowerInvariant();
+            return !lowered.StartsWith("text-embedding", StringComparison.Ordinal)
+                && !lowered.StartsWith("omni-moderation", StringComparison.Ordinal)
+                && !lowered.StartsWith("text-moderation", StringComparison.Ordinal)
+                && !lowered.StartsWith("whisper", StringComparison.Ordinal)
+                && !lowered.StartsWith("tts-", StringComparison.Ordinal)
+                && !lowered.StartsWith("gpt-image", StringComparison.Ordinal)
+                && !lowered.StartsWith("dall-e", StringComparison.Ordinal);
         }
 
         public void Dispose()

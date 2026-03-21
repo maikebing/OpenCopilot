@@ -7,15 +7,6 @@ namespace OpenCopilot.Providers
     {
         public override string Name => "Docker Desktop AI";
 
-        public override string[] AvailableModels => new[]
-        {
-            "ai/smollm2",
-            "ai/llama3.2",
-            "ai/phi4-mini",
-            "ai/mistral-nemo",
-            "ai/qwen2.5-coder"
-        };
-
         public DockerDesktopAIProvider(string model = "ai/smollm2",
             string baseUrl = "http://localhost:12434/engines/llama.cpp/v1",
             string? proxyUrl = null)

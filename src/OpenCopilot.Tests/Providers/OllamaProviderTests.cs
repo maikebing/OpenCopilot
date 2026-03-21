@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -30,18 +31,35 @@ namespace OpenCopilot.Tests.Providers
         [Fact]
         public async Task TestConnectionAsync_ReturnsFalse_WhenServerNotAvailable()
         {
-            // Point to a port that should be closed in the test environment
-            var provider = new OllamaProvider("http://localhost:19999");
+            var mock = new MockHttpMessageHandler();
+            mock.When("http://localhost:11434/api/tags")
+                .Respond(HttpStatusCode.ServiceUnavailable);
+
+            var provider = new TestableOllamaProvider(mock.ToHttpClient());
             var result = await provider.TestConnectionAsync(CancellationToken.None);
-            // Should not throw - returns false gracefully
+
             Assert.False(result);
         }
 
         [Fact]
-        public void AvailableModels_ContainsCodellama()
+        public void AvailableModels_ContainsConfiguredModel()
         {
-            var provider = new OllamaProvider();
-            Assert.Contains("codellama", provider.AvailableModels);
+            var provider = new OllamaProvider("http://localhost:11434", "llama3");
+            Assert.Contains("llama3", provider.AvailableModels);
+        }
+
+        [Fact]
+        public async Task GetAvailableModelsAsync_ReturnsProtocolModels_WhenEndpointReturnsData()
+        {
+            var mock = new MockHttpMessageHandler();
+            mock.When("http://localhost:11434/api/tags")
+                .Respond("application/json", "{\"models\":[{\"name\":\"qwen2.5-coder:7b\"},{\"name\":\"llama3.1:8b\"}]}");
+
+            var provider = new TestableOllamaProvider(mock.ToHttpClient());
+
+            var models = await provider.GetAvailableModelsAsync(CancellationToken.None);
+
+            Assert.Contains("qwen2.5-coder:7b", models);
         }
 
         [Fact]
@@ -101,6 +119,23 @@ namespace OpenCopilot.Tests.Providers
             : base("http://localhost:11434", "codellama")
         {
             _injectedClient = httpClient;
+        }
+
+        public override async Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken cancellationToken = default)
+        {
+            var response = await _injectedClient.GetAsync("http://localhost:11434/api/tags", cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                return System.Array.Empty<string>();
+
+            var json = await response.Content.ReadAsStringAsync();
+            var payload = Newtonsoft.Json.Linq.JObject.Parse(json);
+
+            return payload["models"]
+                ?.Children<Newtonsoft.Json.Linq.JObject>()
+                .Select(item => item["name"]?.ToString())
+                .OfType<string>()
+                .ToArray()
+                ?? System.Array.Empty<string>();
         }
 
         public override async Task<LlmResponse> CompleteAsync(LlmRequest request, CancellationToken cancellationToken = default)

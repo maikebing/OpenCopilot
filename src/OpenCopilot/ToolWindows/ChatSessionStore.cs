@@ -13,6 +13,7 @@ namespace OpenCopilot.ToolWindows
     internal sealed class ChatSessionStore
     {
         private readonly string _sessionsDirectory;
+        private readonly string _attachmentsDirectory;
 
         public ChatSessionStore(string solutionDirectory)
         {
@@ -20,6 +21,7 @@ namespace OpenCopilot.ToolWindows
                 throw new ArgumentException("Solution directory is required.", nameof(solutionDirectory));
 
             _sessionsDirectory = Path.Combine(solutionDirectory, ".opencopilot");
+            _attachmentsDirectory = Path.Combine(_sessionsDirectory, "attachments");
         }
 
         public async Task<IReadOnlyList<ChatSessionInfo>> LoadSessionsAsync(CancellationToken cancellationToken)
@@ -55,6 +57,40 @@ namespace OpenCopilot.ToolWindows
             return session;
         }
 
+        public async Task RenameSessionAsync(ChatSessionInfo session, string title, IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken)
+        {
+            if (session == null)
+                throw new ArgumentNullException(nameof(session));
+            if (string.IsNullOrWhiteSpace(title))
+                throw new ArgumentException("Session title is required.", nameof(title));
+
+            session.Title = title;
+            await SaveSessionAsync(session, messages ?? Array.Empty<ChatMessage>(), cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task DeleteSessionAsync(ChatSessionInfo session, CancellationToken cancellationToken)
+        {
+            if (session == null)
+                throw new ArgumentNullException(nameof(session));
+
+            await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (File.Exists(session.FilePath))
+                    File.Delete(session.FilePath);
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
+        public string CreateAttachmentFilePath(string extension)
+        {
+            var normalizedExtension = string.IsNullOrWhiteSpace(extension)
+                ? ".bin"
+                : extension.StartsWith(".", StringComparison.Ordinal) ? extension : "." + extension;
+
+            Directory.CreateDirectory(_attachmentsDirectory);
+            return Path.Combine(_attachmentsDirectory, $"attachment-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}{normalizedExtension}");
+        }
+
         public async Task<IReadOnlyList<ChatMessage>> LoadMessagesAsync(ChatSessionInfo session, CancellationToken cancellationToken)
         {
             if (session == null)
@@ -83,8 +119,9 @@ namespace OpenCopilot.ToolWindows
                 var builder = new StringBuilder();
                 builder.AppendLine("# " + title);
                 builder.AppendLine();
-                builder.AppendLine($"<!-- OpenCopilotSession: title-source={session.TitleSource.ToString().ToLowerInvariant()} -->");
-                builder.AppendLine($"<!-- UpdatedUtc: {DateTime.UtcNow:O} -->");
+                builder.AppendLine("> OpenCopilot conversation transcript");
+                builder.AppendLine($"> Title source: {session.TitleSource.ToString().ToLowerInvariant()}");
+                builder.AppendLine($"> Updated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 builder.AppendLine();
                 builder.AppendLine("## Conversation");
                 builder.AppendLine();
@@ -94,15 +131,20 @@ namespace OpenCopilot.ToolWindows
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var sender = string.IsNullOrWhiteSpace(message.Sender) ? "OpenCopilot" : message.Sender.Trim();
-                    var content = message.Content ?? string.Empty;
-                    var fence = CreateFence(content);
+                    var content = (message.Content ?? string.Empty).Replace("\r\n", "\n");
 
                     builder.AppendLine("### " + sender);
-                    builder.AppendLine(fence + "text");
-                    builder.AppendLine(content);
-                    if (!content.EndsWith("\n", StringComparison.Ordinal))
-                        builder.AppendLine();
-                    builder.AppendLine(fence);
+                    var lines = content.Split('\n');
+                    if (lines.Length == 0)
+                    {
+                        builder.AppendLine("> ");
+                    }
+                    else
+                    {
+                        foreach (var line in lines)
+                            builder.AppendLine(string.IsNullOrEmpty(line) ? ">" : "> " + line);
+                    }
+
                     builder.AppendLine();
                 }
 
@@ -131,27 +173,6 @@ namespace OpenCopilot.ToolWindows
             return sanitized.Length > 80 ? sanitized.Substring(0, 80).TrimEnd() : sanitized;
         }
 
-        private static string CreateFence(string content)
-        {
-            var longestRun = 0;
-            var currentRun = 0;
-            foreach (var ch in content ?? string.Empty)
-            {
-                if (ch == '`')
-                {
-                    currentRun++;
-                    if (currentRun > longestRun)
-                        longestRun = currentRun;
-                }
-                else
-                {
-                    currentRun = 0;
-                }
-            }
-
-            return new string('`', Math.Max(3, longestRun + 1));
-        }
-
         private static ChatSessionDocument ReadDocument(string filePath)
         {
             if (!File.Exists(filePath))
@@ -174,13 +195,13 @@ namespace OpenCopilot.ToolWindows
                     continue;
                 }
 
-                if (line.IndexOf("title-source=ai", StringComparison.OrdinalIgnoreCase) >= 0)
+                if (line.IndexOf("Title source: ai", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     titleSource = ChatSessionTitleSource.Ai;
                     continue;
                 }
 
-                if (line.IndexOf("title-source=fallback", StringComparison.OrdinalIgnoreCase) >= 0)
+                if (line.IndexOf("Title source: fallback", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     titleSource = ChatSessionTitleSource.Fallback;
                     continue;
@@ -190,27 +211,26 @@ namespace OpenCopilot.ToolWindows
                     continue;
 
                 var sender = line.Substring(4).Trim();
-                i++;
-                while (i < lines.Length && string.IsNullOrWhiteSpace(lines[i]))
-                    i++;
-
-                if (i >= lines.Length)
-                    break;
-
-                var fence = TryGetFence(lines[i]);
-                if (fence == null)
-                    continue;
-
-                i++;
                 var contentLines = new List<string>();
-                while (i < lines.Length && !string.Equals(lines[i], fence, StringComparison.Ordinal))
+                i++;
+                while (i < lines.Length && !lines[i].StartsWith("### ", StringComparison.Ordinal))
                 {
-                    contentLines.Add(lines[i]);
+                    if (lines[i].StartsWith("> ", StringComparison.Ordinal))
+                        contentLines.Add(lines[i].Substring(2));
+                    else if (string.Equals(lines[i], ">", StringComparison.Ordinal))
+                        contentLines.Add(string.Empty);
+                    else if (string.IsNullOrWhiteSpace(lines[i]) && contentLines.Count > 0)
+                        contentLines.Add(string.Empty);
+
                     i++;
                 }
 
-                var content = string.Join("\n", contentLines).TrimEnd('\n');
+                while (contentLines.Count > 0 && string.IsNullOrWhiteSpace(contentLines[contentLines.Count - 1]))
+                    contentLines.RemoveAt(contentLines.Count - 1);
+
+                var content = string.Join("\n", contentLines);
                 messages.Add(new ChatMessage(sender, content));
+                i--;
             }
 
             if (titleSource == ChatSessionTitleSource.Generated && !string.Equals(title, "New chat", StringComparison.OrdinalIgnoreCase))
@@ -218,23 +238,6 @@ namespace OpenCopilot.ToolWindows
 
             return new ChatSessionDocument(title, titleSource, messages);
         }
-
-        private static string? TryGetFence(string line)
-        {
-            if (string.IsNullOrEmpty(line))
-                return null;
-
-            var fenceChar = line[0];
-            if (fenceChar != '`' && fenceChar != '~')
-                return null;
-
-            var count = 0;
-            while (count < line.Length && line[count] == fenceChar)
-                count++;
-
-            return count >= 3 ? new string(fenceChar, count) : null;
-        }
-
         private sealed class ChatSessionDocument
         {
             public ChatSessionDocument(string title, ChatSessionTitleSource titleSource, List<ChatMessage> messages)

@@ -171,6 +171,9 @@ namespace OpenCopilot.Tests.Services
         public Task<IAsyncEnumerable<string>> StreamCompleteAsync(LlmRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(EmptyAsyncEnumerable());
 
+        public Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<string>>(AvailableModels);
+
         public Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(_success);
 
