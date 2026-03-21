@@ -213,10 +213,13 @@ namespace OpenCopilot.ToolWindows
                 messages.Add(new ChatMessage(sender, content));
             }
 
+            if (titleSource == ChatSessionTitleSource.Generated && !string.Equals(title, "New chat", StringComparison.OrdinalIgnoreCase))
+                titleSource = ChatSessionTitleSource.Fallback;
+
             return new ChatSessionDocument(title, titleSource, messages);
         }
 
-        private static string TryGetFence(string line)
+        private static string? TryGetFence(string line)
         {
             if (string.IsNullOrEmpty(line))
                 return null;
@@ -265,7 +268,7 @@ namespace OpenCopilot.ToolWindows
             TitleSource = titleSource;
         }
 
-        public event PropertyChangedEventHandler PropertyChanged;
+        public event PropertyChangedEventHandler? PropertyChanged;
 
         public string FilePath { get; }
 
@@ -288,7 +291,7 @@ namespace OpenCopilot.ToolWindows
 
         public override string ToString() => Title;
 
-        private void OnPropertyChanged([CallerMemberName] string propertyName = null)
+        private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }

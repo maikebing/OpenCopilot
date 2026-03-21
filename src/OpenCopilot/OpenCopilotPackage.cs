@@ -166,7 +166,8 @@ namespace OpenCopilot
                 if (window.Content is CopilotChatWindowControl control)
                 {
                     var provider = _llmService.ActiveProvider;
-                    control.Initialize(_llmService, provider?.Name, GetActiveModel());
+                    var solutionDirectory = await GetSolutionDirectoryAsync(DisposalToken);
+                    await control.InitializeAsync(_llmService, provider?.Name, GetActiveModel(), solutionDirectory);
                 }
             }
         }
