@@ -276,12 +276,23 @@ namespace OpenCopilot.Providers
 
             var lowered = normalized.ToLowerInvariant();
             return !lowered.StartsWith("text-embedding", StringComparison.Ordinal)
+                && !lowered.StartsWith("embedding-", StringComparison.Ordinal)
                 && !lowered.StartsWith("omni-moderation", StringComparison.Ordinal)
                 && !lowered.StartsWith("text-moderation", StringComparison.Ordinal)
                 && !lowered.StartsWith("whisper", StringComparison.Ordinal)
                 && !lowered.StartsWith("tts-", StringComparison.Ordinal)
+                && !lowered.StartsWith("speech-", StringComparison.Ordinal)
+                && !lowered.StartsWith("rerank", StringComparison.Ordinal)
+                && !lowered.StartsWith("text-search", StringComparison.Ordinal)
+                && !lowered.StartsWith("text-similarity", StringComparison.Ordinal)
+                && !lowered.StartsWith("code-search", StringComparison.Ordinal)
+                && !lowered.StartsWith("davinci-002", StringComparison.Ordinal)
+                && !lowered.StartsWith("babbage-002", StringComparison.Ordinal)
                 && !lowered.StartsWith("gpt-image", StringComparison.Ordinal)
-                && !lowered.StartsWith("dall-e", StringComparison.Ordinal);
+                && !lowered.StartsWith("dall-e", StringComparison.Ordinal)
+                && !lowered.Contains("embedding", StringComparison.Ordinal)
+                && !lowered.Contains("moderation", StringComparison.Ordinal)
+                && !lowered.Contains("rerank", StringComparison.Ordinal);
         }
 
         public void Dispose()

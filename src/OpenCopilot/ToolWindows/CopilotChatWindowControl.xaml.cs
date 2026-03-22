@@ -16,6 +16,8 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.Win32;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using AgentToolCallModel = OpenCopilot.Chat.AgentToolCall;
+using OpenCopilot.Chat;
 using OpenCopilot.Mcp;
 using OpenCopilot.Options;
 using OpenCopilot.Providers;
@@ -540,12 +542,13 @@ namespace OpenCopilot.ToolWindows
                 ? preferredModel
                 : GetPreferredModelForProvider(providerName);
 
+            var discoveredModelsAvailable = _models.Count > 0;
             var modelName = _models.FirstOrDefault(model => string.Equals(model, effectivePreferredModel, StringComparison.OrdinalIgnoreCase))
                 ?? _models.FirstOrDefault()
                 ?? effectivePreferredModel
                 ?? string.Empty;
 
-            if (!string.IsNullOrWhiteSpace(modelName) && !_models.Contains(modelName))
+            if (!discoveredModelsAvailable && !string.IsNullOrWhiteSpace(modelName) && !_models.Contains(modelName))
                 _models.Add(modelName);
 
             ModelSelector.Items.Refresh();
@@ -663,7 +666,7 @@ namespace OpenCopilot.ToolWindows
                 if (!response.IsSuccess)
                     return response;
 
-                var directive = ParseAgentDirective(response.Content);
+                var directive = AgentDirectiveParser.Parse(response.Content);
                 if (directive.ToolCalls.Count == 0)
                     return LlmResponse.Success(directive.FinalMessage, response.FinishReason, response.PromptTokens, response.CompletionTokens);
 
@@ -680,17 +683,17 @@ namespace OpenCopilot.ToolWindows
 
                 if (hasFileMutations)
                 {
-                    var buildResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCall.Empty("vs_build_solution"), cancellationToken).ConfigureAwait(false);
+                    var buildResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCallModel.Empty("vs_build_solution"), cancellationToken).ConfigureAwait(false);
                     toolPrompts.Add(BuildToolResultPrompt("vs_build_solution", buildResult));
 
                     if (buildResult.IsError)
                     {
-                        var errorResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCall.Empty("vs_get_build_errors"), cancellationToken).ConfigureAwait(false);
+                        var errorResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCallModel.Empty("vs_get_build_errors"), cancellationToken).ConfigureAwait(false);
                         toolPrompts.Add(BuildToolResultPrompt("vs_get_build_errors", errorResult));
                     }
                     else
                     {
-                        var testResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCall.Empty("vs_run_tests"), cancellationToken).ConfigureAwait(false);
+                        var testResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCallModel.Empty("vs_run_tests"), cancellationToken).ConfigureAwait(false);
                         toolPrompts.Add(BuildToolResultPrompt("vs_run_tests", testResult));
                     }
                 }
@@ -729,7 +732,7 @@ namespace OpenCopilot.ToolWindows
             return builder.ToString().TrimEnd();
         }
 
-        private async Task<McpToolCallResult> ExecuteAgentToolCallAsync(McpService mcpService, AgentToolCall toolCall, CancellationToken cancellationToken)
+        private async Task<McpToolCallResult> ExecuteAgentToolCallAsync(McpService mcpService, AgentToolCallModel toolCall, CancellationToken cancellationToken)
         {
             var arguments = toolCall.Arguments?.Properties().ToDictionary(
                 property => property.Name,
@@ -740,9 +743,7 @@ namespace OpenCopilot.ToolWindows
             var result = await mcpService.CallToolAsync(toolCall.ToolName, arguments, cancellationToken).ConfigureAwait(false);
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-            var toolMessage = result.IsError
-                ? $"[工具失败] {toolCall.ToolName}\n{result.ErrorMessage}"
-                : $"[工具调用] {toolCall.ToolName}\n{result.GetTextContent()}";
+            var toolMessage = ChatToolActivityFormatter.Format(toolCall, result);
 
             _messages.Add(new ChatMessage("Tool", toolMessage));
             ChatScrollViewer.ScrollToBottom();
@@ -761,72 +762,6 @@ namespace OpenCopilot.ToolWindows
             builder.AppendLine();
             builder.AppendLine("Continue by either requesting the next tool with JSON or returning the final answer JSON.");
             return builder.ToString().TrimEnd();
-        }
-
-        private static AgentDirective ParseAgentDirective(string responseContent)
-        {
-            var payload = ExtractJsonObject(responseContent);
-            if (string.IsNullOrWhiteSpace(payload))
-                return AgentDirective.Final(responseContent);
-
-            try
-            {
-                var json = JObject.Parse(payload);
-                var type = json["type"]?.ToString();
-                if (string.Equals(type, "tool_call", StringComparison.OrdinalIgnoreCase))
-                {
-                    var toolName = json["tool"]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(toolName))
-                        return AgentDirective.FromToolCalls(new[] { new AgentToolCall(toolName, json["arguments"] as JObject ?? new JObject()) });
-                }
-
-                if (string.Equals(type, "tool_calls", StringComparison.OrdinalIgnoreCase))
-                {
-                    var calls = json["calls"] as JArray;
-                    if (calls != null)
-                    {
-                        var parsedCalls = new List<AgentToolCall>();
-                        foreach (var call in calls.OfType<JObject>())
-                        {
-                            var toolName = call["tool"]?.ToString();
-                            if (!string.IsNullOrWhiteSpace(toolName))
-                                parsedCalls.Add(new AgentToolCall(toolName, call["arguments"] as JObject ?? new JObject()));
-                        }
-
-                        if (parsedCalls.Count > 0)
-                            return AgentDirective.FromToolCalls(parsedCalls);
-                    }
-                }
-
-                if (string.Equals(type, "final", StringComparison.OrdinalIgnoreCase))
-                    return AgentDirective.Final(json["message"]?.ToString() ?? responseContent);
-            }
-            catch (JsonException)
-            {
-            }
-
-            return AgentDirective.Final(responseContent);
-        }
-
-        private static string? ExtractJsonObject(string responseContent)
-        {
-            var trimmed = (responseContent ?? string.Empty).Trim();
-            if (trimmed.StartsWith("```", StringComparison.Ordinal))
-            {
-                var firstLineBreak = trimmed.IndexOf('\n');
-                if (firstLineBreak >= 0)
-                    trimmed = trimmed.Substring(firstLineBreak + 1).Trim();
-
-                var closingFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
-                if (closingFence >= 0)
-                    trimmed = trimmed.Substring(0, closingFence).Trim();
-            }
-
-            var start = trimmed.IndexOf('{');
-            var end = trimmed.LastIndexOf('}');
-            return start >= 0 && end > start
-                ? trimmed.Substring(start, end - start + 1)
-                : null;
         }
 
         private static bool IsMutatingTool(string toolName)
@@ -1367,41 +1302,6 @@ namespace OpenCopilot.ToolWindows
 
             return history;
         }
-    }
-
-    internal sealed class AgentDirective
-    {
-        private AgentDirective(IReadOnlyList<AgentToolCall> toolCalls, string finalMessage)
-        {
-            ToolCalls = toolCalls;
-            FinalMessage = finalMessage;
-        }
-
-        public IReadOnlyList<AgentToolCall> ToolCalls { get; }
-
-        public string FinalMessage { get; }
-
-        public static AgentDirective FromToolCalls(IReadOnlyList<AgentToolCall> toolCalls)
-            => new AgentDirective(toolCalls ?? Array.Empty<AgentToolCall>(), string.Empty);
-
-        public static AgentDirective Final(string finalMessage)
-            => new AgentDirective(Array.Empty<AgentToolCall>(), finalMessage ?? string.Empty);
-    }
-
-    internal sealed class AgentToolCall
-    {
-        public AgentToolCall(string toolName, JObject arguments)
-        {
-            ToolName = toolName ?? string.Empty;
-            Arguments = arguments;
-        }
-
-        public string ToolName { get; }
-
-        public JObject Arguments { get; }
-
-        public static AgentToolCall Empty(string toolName)
-            => new AgentToolCall(toolName, new JObject());
     }
 
     /// <summary>View model for a single chat bubble.</summary>

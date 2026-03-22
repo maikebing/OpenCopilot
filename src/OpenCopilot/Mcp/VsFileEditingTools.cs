@@ -245,10 +245,34 @@ namespace OpenCopilot.Mcp
                     }
 
                     var activeDocumentPath = await TryGetActiveDocumentPathAsync().ConfigureAwait(false);
-                    var appliedViaEditor = IdeToolLogic.ShouldTryOpenDocumentSync(activeDocumentPath, write)
-                        && await TryReplaceOpenDocumentAsync(write.Path, write.Content).ConfigureAwait(false);
-                    if (!appliedViaEditor)
+                    var syncAction = IdeToolLogic.DetermineOpenDocumentSyncAction(activeDocumentPath, write);
+                    var synchronizedViaDocument = false;
+                    switch (syncAction)
+                    {
+                        case IdeOpenDocumentSyncAction.ReplaceTarget:
+                            synchronizedViaDocument = await TryReplaceOpenDocumentAsync(write.Path, write.Content).ConfigureAwait(false);
+                            break;
+                        case IdeOpenDocumentSyncAction.CopySourceToTarget:
+                            synchronizedViaDocument = !string.IsNullOrWhiteSpace(write.SourcePath)
+                                && await TryCopyFromOpenDocumentAsync(write.SourcePath, write.Path).ConfigureAwait(false);
+                            break;
+                        case IdeOpenDocumentSyncAction.RenameSourceToTarget:
+                            synchronizedViaDocument = !string.IsNullOrWhiteSpace(write.SourcePath)
+                                && await TrySaveOpenDocumentAsAsync(write.SourcePath, write.Path).ConfigureAwait(false);
+                            break;
+                    }
+
+                    if (synchronizedViaDocument)
+                    {
+                        IdeToolLogic.ApplyPatchWrites(new[]
+                        {
+                            new IdePatchWrite(write.Path, write.Content, write.Kind, write.SourcePath, write.OriginalMode, write.UpdatedMode, shouldWriteContent: false)
+                        });
+                    }
+                    else
+                    {
                         IdeToolLogic.ApplyPatchWrites(new[] { write });
+                    }
 
                     if (write.Kind == IdePatchOperationKind.Copy)
                         await TryAddFileToProjectAsync(write.Path, write.SourcePath).ConfigureAwait(false);
@@ -698,23 +722,19 @@ namespace OpenCopilot.Mcp
             if (projects == null)
                 return null;
 
-            var knownItemPaths = new List<string>();
-            var projectRootPaths = new List<string>();
-            CollectProjectMetadata(projects, knownItemPaths, projectRootPaths);
-            var containerPath = IdeToolLogic.ResolveProjectAttachmentContainerPath(targetPath, relatedPath, knownItemPaths, projectRootPaths);
+            var containerPath = ResolveTargetProjectContainerPath(projects, targetPath, relatedPath);
             if (string.IsNullOrWhiteSpace(containerPath))
                 return null;
 
-            var relatedItem = FindProjectItemByPath(projects, relatedPath);
-            if (relatedItem != null && AreSamePath(containerPath, relatedPath) && relatedItem.Collection != null)
-                return relatedItem.Collection;
+            var relatedCollection = TryGetProjectItemsFromRelatedItem(projects, containerPath, relatedPath);
+            if (relatedCollection != null)
+                return relatedCollection;
 
-            var folderItem = FindProjectItemByPath(projects, containerPath);
-            if (folderItem?.ProjectItems != null)
-                return folderItem.ProjectItems;
+            var folderCollection = TryGetProjectItemsFromFolderItem(projects, containerPath);
+            if (folderCollection != null)
+                return folderCollection;
 
-            var project = FindContainingProject(projects, containerPath) ?? FindContainingProject(projects, targetPath) ?? FindContainingProject(projects, relatedPath);
-            return project?.ProjectItems;
+            return TryGetProjectItemsFromContainingProject(projects, containerPath, targetPath, relatedPath);
         }
 
         private static EnvDTE.Project? FindContainingProject(EnvDTE.Projects? projects, string? path)
@@ -789,6 +809,108 @@ namespace OpenCopilot.Mcp
             {
                 return null;
             }
+        }
+
+        private async Task<bool> TryCopyFromOpenDocumentAsync(string sourcePath, string targetPath)
+        {
+            var content = await TryGetOpenDocumentTextAsync(sourcePath).ConfigureAwait(false);
+            if (content == null)
+                return false;
+
+            var directory = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
+                Directory.CreateDirectory(directory);
+
+            File.WriteAllText(targetPath, content);
+            return true;
+        }
+
+        private async Task<bool> TrySaveOpenDocumentAsAsync(string sourcePath, string targetPath)
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var dte = await _package.GetServiceAsync(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                if (!AreSamePath(dte?.ActiveDocument?.FullName, sourcePath))
+                    return false;
+
+                var directory = Path.GetDirectoryName(targetPath);
+                if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
+                    Directory.CreateDirectory(directory);
+
+                dte.ActiveDocument.Save(targetPath);
+                return File.Exists(targetPath);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task<string?> TryGetOpenDocumentTextAsync(string path)
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var dte = await _package.GetServiceAsync(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                if (!AreSamePath(dte?.ActiveDocument?.FullName, path))
+                    return null;
+
+                var textManager = await _package.GetServiceAsync(typeof(SVsTextManager)) as IVsTextManager2;
+                if (textManager == null)
+                    return null;
+
+                textManager.GetActiveView2(1, null, (uint)_VIEWFRAMETYPE.vftCodeWindow, out var activeView);
+                if (activeView == null)
+                    return null;
+
+                activeView.GetBuffer(out var buffer);
+                if (buffer == null)
+                    return null;
+
+                buffer.GetLastLineIndex(out var lastLine, out var lastCol);
+                buffer.GetLineText(0, 0, lastLine, lastCol, out var fullText);
+                return fullText;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? ResolveTargetProjectContainerPath(EnvDTE.Projects? projects, string targetPath, string? relatedPath)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (projects == null)
+                return null;
+
+            var knownItemPaths = new List<string>();
+            var projectRootPaths = new List<string>();
+            CollectProjectMetadata(projects, knownItemPaths, projectRootPaths);
+            return IdeToolLogic.ResolveProjectAttachmentContainerPath(targetPath, relatedPath, knownItemPaths, projectRootPaths);
+        }
+
+        private static EnvDTE.ProjectItems? TryGetProjectItemsFromRelatedItem(EnvDTE.Projects? projects, string containerPath, string? relatedPath)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var relatedItem = FindProjectItemByPath(projects, relatedPath);
+            return relatedItem != null && AreSamePath(containerPath, relatedPath) && relatedItem.Collection != null
+                ? relatedItem.Collection
+                : null;
+        }
+
+        private static EnvDTE.ProjectItems? TryGetProjectItemsFromFolderItem(EnvDTE.Projects? projects, string containerPath)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var folderItem = FindProjectItemByPath(projects, containerPath);
+            return folderItem?.ProjectItems;
+        }
+
+        private static EnvDTE.ProjectItems? TryGetProjectItemsFromContainingProject(EnvDTE.Projects? projects, string containerPath, string targetPath, string? relatedPath)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var project = FindContainingProject(projects, containerPath) ?? FindContainingProject(projects, targetPath) ?? FindContainingProject(projects, relatedPath);
+            return project?.ProjectItems;
         }
 
         private static IEnumerable<EnvDTE.Project> EnumerateProjects(EnvDTE.Projects? projects)

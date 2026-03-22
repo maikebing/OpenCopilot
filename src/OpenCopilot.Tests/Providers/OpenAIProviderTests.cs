@@ -139,6 +139,20 @@ namespace OpenCopilot.Tests.Providers
         }
 
         [Fact]
+        public async Task GetAvailableModelsAsync_FiltersAdditionalNonChatModels()
+        {
+            var mock = new MockHttpMessageHandler();
+            mock.When("https://api.openai.com/v1/models")
+                .Respond("application/json", "{\"data\":[{\"id\":\"davinci-002\"},{\"id\":\"rerank-v3.5\"},{\"id\":\"text-search-babbage-doc-001\"},{\"id\":\"gpt-4o-mini\"}]}");
+
+            var provider = new TestableOpenAIProvider("test-key", "gpt-4o-mini", "https://api.openai.com/v1", mock.ToHttpClient());
+
+            var models = await provider.GetAvailableModelsAsync(CancellationToken.None);
+
+            Assert.Equal(new[] { "gpt-4o-mini" }, models);
+        }
+
+        [Fact]
         public void DeepSeekProvider_Name_IsDeepSeek()
         {
             var p = new DeepSeekProvider("key");

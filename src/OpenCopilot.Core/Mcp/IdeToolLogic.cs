@@ -19,6 +19,14 @@ namespace OpenCopilot.Mcp
         Rename,
     }
 
+    public enum IdeOpenDocumentSyncAction
+    {
+        None,
+        ReplaceTarget,
+        CopySourceToTarget,
+        RenameSourceToTarget,
+    }
+
     public sealed class IdePatchBlock
     {
         public IdePatchBlock(string searchText, string replaceText)
@@ -320,28 +328,39 @@ namespace OpenCopilot.Mcp
         }
 
         /// <summary>
-        /// Resolves the best project-system container path for a target file.
+        /// Resolves the full target directory for a project-system attachment lookup.
         /// </summary>
-        public static string? ResolveProjectAttachmentContainerPath(string targetPath, string? relatedPath, IReadOnlyList<string> knownItemPaths, IReadOnlyList<string> projectRootPaths)
+        public static string? ResolveProjectAttachmentTargetDirectory(string targetPath)
         {
             if (string.IsNullOrWhiteSpace(targetPath))
                 throw new ArgumentException("Target path is required.", nameof(targetPath));
-            if (knownItemPaths == null)
-                throw new ArgumentNullException(nameof(knownItemPaths));
-            if (projectRootPaths == null)
-                throw new ArgumentNullException(nameof(projectRootPaths));
 
-            var fullTargetPath = System.IO.Path.GetFullPath(targetPath);
-            var targetDirectory = System.IO.Path.GetDirectoryName(fullTargetPath);
-            if (string.IsNullOrWhiteSpace(targetDirectory))
+            return System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(targetPath));
+        }
+
+        /// <summary>
+        /// Resolves a related file when the target is in the same directory.
+        /// </summary>
+        public static string? ResolveRelatedAttachmentPath(string targetDirectory, string? relatedPath)
+        {
+            if (string.IsNullOrWhiteSpace(targetDirectory) || string.IsNullOrWhiteSpace(relatedPath))
                 return null;
 
-            if (!string.IsNullOrWhiteSpace(relatedPath))
-            {
-                var fullRelatedPath = System.IO.Path.GetFullPath(relatedPath);
-                if (AreSamePath(System.IO.Path.GetDirectoryName(fullRelatedPath), targetDirectory))
-                    return fullRelatedPath;
-            }
+            var fullRelatedPath = System.IO.Path.GetFullPath(relatedPath);
+            return AreSamePath(System.IO.Path.GetDirectoryName(fullRelatedPath), targetDirectory)
+                ? fullRelatedPath
+                : null;
+        }
+
+        /// <summary>
+        /// Resolves a known folder item that matches the target directory.
+        /// </summary>
+        public static string? ResolveKnownAttachmentContainerPath(string targetDirectory, IReadOnlyList<string> knownItemPaths)
+        {
+            if (string.IsNullOrWhiteSpace(targetDirectory))
+                return null;
+            if (knownItemPaths == null)
+                throw new ArgumentNullException(nameof(knownItemPaths));
 
             foreach (var knownItemPath in knownItemPaths.Where(path => !string.IsNullOrWhiteSpace(path)).OrderByDescending(path => path.Length))
             {
@@ -350,6 +369,20 @@ namespace OpenCopilot.Mcp
                     return fullKnownItemPath;
             }
 
+            return null;
+        }
+
+        /// <summary>
+        /// Resolves the deepest project root that contains the target path.
+        /// </summary>
+        public static string? ResolveContainingProjectRoot(string targetPath, IReadOnlyList<string> projectRootPaths)
+        {
+            if (string.IsNullOrWhiteSpace(targetPath))
+                throw new ArgumentException("Target path is required.", nameof(targetPath));
+            if (projectRootPaths == null)
+                throw new ArgumentNullException(nameof(projectRootPaths));
+
+            var fullTargetPath = System.IO.Path.GetFullPath(targetPath);
             string? bestProjectRoot = null;
             foreach (var projectRootPath in projectRootPaths.Where(path => !string.IsNullOrWhiteSpace(path)))
             {
@@ -365,24 +398,72 @@ namespace OpenCopilot.Mcp
         }
 
         /// <summary>
-        /// Determines whether an active document should be synchronized through the editor for a patch write.
+        /// Resolves the best project-system container path for a target file.
         /// </summary>
-        public static bool ShouldTryOpenDocumentSync(string? activeDocumentPath, IdePatchWrite write)
+        public static string? ResolveProjectAttachmentContainerPath(string targetPath, string? relatedPath, IReadOnlyList<string> knownItemPaths, IReadOnlyList<string> projectRootPaths)
+        {
+            if (string.IsNullOrWhiteSpace(targetPath))
+                throw new ArgumentException("Target path is required.", nameof(targetPath));
+            if (knownItemPaths == null)
+                throw new ArgumentNullException(nameof(knownItemPaths));
+            if (projectRootPaths == null)
+                throw new ArgumentNullException(nameof(projectRootPaths));
+
+            var fullTargetPath = System.IO.Path.GetFullPath(targetPath);
+            var targetDirectory = ResolveProjectAttachmentTargetDirectory(fullTargetPath);
+            if (string.IsNullOrWhiteSpace(targetDirectory))
+                return null;
+
+            var relatedMatch = ResolveRelatedAttachmentPath(targetDirectory, relatedPath);
+            if (!string.IsNullOrWhiteSpace(relatedMatch))
+                return relatedMatch;
+
+            var knownMatch = ResolveKnownAttachmentContainerPath(targetDirectory, knownItemPaths);
+            if (!string.IsNullOrWhiteSpace(knownMatch))
+                return knownMatch;
+
+            return ResolveContainingProjectRoot(fullTargetPath, projectRootPaths);
+        }
+
+        /// <summary>
+        /// Determines how an open document should be synchronized for a patch write.
+        /// </summary>
+        public static IdeOpenDocumentSyncAction DetermineOpenDocumentSyncAction(string? activeDocumentPath, IdePatchWrite write)
         {
             if (write == null)
                 throw new ArgumentNullException(nameof(write));
             if (string.IsNullOrWhiteSpace(activeDocumentPath) || !write.ShouldWriteContent)
-                return false;
+                return IdeOpenDocumentSyncAction.None;
 
             switch (write.Kind)
             {
                 case IdePatchOperationKind.Modify:
+                    return AreSamePath(activeDocumentPath, write.Path)
+                        ? IdeOpenDocumentSyncAction.ReplaceTarget
+                        : IdeOpenDocumentSyncAction.None;
                 case IdePatchOperationKind.Copy:
+                    if (AreSamePath(activeDocumentPath, write.Path))
+                        return IdeOpenDocumentSyncAction.ReplaceTarget;
+                    return AreSamePath(activeDocumentPath, write.SourcePath)
+                        ? IdeOpenDocumentSyncAction.CopySourceToTarget
+                        : IdeOpenDocumentSyncAction.None;
                 case IdePatchOperationKind.Rename:
-                    return AreSamePath(activeDocumentPath, write.Path);
+                    if (AreSamePath(activeDocumentPath, write.Path))
+                        return IdeOpenDocumentSyncAction.ReplaceTarget;
+                    return AreSamePath(activeDocumentPath, write.SourcePath)
+                        ? IdeOpenDocumentSyncAction.RenameSourceToTarget
+                        : IdeOpenDocumentSyncAction.None;
                 default:
-                    return false;
+                    return IdeOpenDocumentSyncAction.None;
             }
+        }
+
+        /// <summary>
+        /// Determines whether an active document should be synchronized through a target-document replace operation.
+        /// </summary>
+        public static bool ShouldTryOpenDocumentSync(string? activeDocumentPath, IdePatchWrite write)
+        {
+            return DetermineOpenDocumentSyncAction(activeDocumentPath, write) == IdeOpenDocumentSyncAction.ReplaceTarget;
         }
 
         /// <summary>

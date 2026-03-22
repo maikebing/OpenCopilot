@@ -313,6 +313,36 @@ namespace OpenCopilot.Tests.Mcp
         }
 
         [Fact]
+        public void ResolveRelatedAttachmentPath_ReturnsRelatedPath_WhenTargetSharesDirectory()
+        {
+            var relatedPath = Path.Combine(@"C:\repo", "src", "File.cs");
+
+            var containerPath = IdeToolLogic.ResolveRelatedAttachmentPath(Path.Combine(@"C:\repo", "src"), relatedPath);
+
+            Assert.Equal(relatedPath, containerPath);
+        }
+
+        [Fact]
+        public void ResolveKnownAttachmentContainerPath_ReturnsKnownFolder_WhenFolderMatches()
+        {
+            var folderPath = Path.Combine(@"C:\repo", "src", "Nested");
+
+            var containerPath = IdeToolLogic.ResolveKnownAttachmentContainerPath(Path.Combine(@"C:\repo", "src", "Nested"), new[] { folderPath });
+
+            Assert.Equal(folderPath, containerPath);
+        }
+
+        [Fact]
+        public void ResolveContainingProjectRoot_ReturnsDeepestProjectRoot_WhenMultipleRootsMatch()
+        {
+            var containerPath = IdeToolLogic.ResolveContainingProjectRoot(
+                Path.Combine(@"C:\repo", "src", "ProjectA", "Folder", "File.cs"),
+                new[] { Path.Combine(@"C:\repo", "src"), Path.Combine(@"C:\repo", "src", "ProjectA") });
+
+            Assert.Equal(Path.Combine(@"C:\repo", "src", "ProjectA"), containerPath);
+        }
+
+        [Fact]
         public void ResolveProjectAttachmentContainerPath_ReturnsKnownFolderItem_WhenTargetDirectoryIsKnown()
         {
             var folderPath = Path.Combine("C:\\repo", "src", "Nested");
@@ -358,6 +388,26 @@ namespace OpenCopilot.Tests.Mcp
             var shouldSync = IdeToolLogic.ShouldTryOpenDocumentSync("C:\\repo\\source.cs", write);
 
             Assert.False(shouldSync);
+        }
+
+        [Fact]
+        public void DetermineOpenDocumentSyncAction_ReturnsCopySourceToTarget_WhenCopySourceIsActive()
+        {
+            var write = new IdePatchWrite("C:\\repo\\target.cs", "content", IdePatchOperationKind.Copy, "C:\\repo\\source.cs");
+
+            var action = IdeToolLogic.DetermineOpenDocumentSyncAction("C:\\repo\\source.cs", write);
+
+            Assert.Equal(IdeOpenDocumentSyncAction.CopySourceToTarget, action);
+        }
+
+        [Fact]
+        public void DetermineOpenDocumentSyncAction_ReturnsRenameSourceToTarget_WhenRenameSourceIsActive()
+        {
+            var write = new IdePatchWrite("C:\\repo\\target.cs", "content", IdePatchOperationKind.Rename, "C:\\repo\\source.cs");
+
+            var action = IdeToolLogic.DetermineOpenDocumentSyncAction("C:\\repo\\source.cs", write);
+
+            Assert.Equal(IdeOpenDocumentSyncAction.RenameSourceToTarget, action);
         }
 
         [Fact]
