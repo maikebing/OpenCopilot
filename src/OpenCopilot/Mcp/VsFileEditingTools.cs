@@ -38,6 +38,16 @@ namespace OpenCopilot.Mcp
             mcpService.RegisterBuiltInTool(
                 new McpTool
                 {
+                    Name = "vs_get_ide_context",
+                    Description = "Get the current IDE context including the open solution, the current project, the active document, the inferred language, and the runtime/target framework.",
+                    ServerName = "BuiltIn",
+                    IsBuiltIn = true
+                },
+                GetIdeContextAsync);
+
+            mcpService.RegisterBuiltInTool(
+                new McpTool
+                {
                     Name = "vs_read_file",
                     Description = "Read a file. Parameters: path (string), startLine (int, optional, 1-based), endLine (int, optional), includeLineNumbers (bool, optional), startChar (int, optional, 0-based), charLength (int, optional), targetLine (int, optional), contextLines (int, optional), anchorText (string, optional), beforeChars (int, optional), afterChars (int, optional), occurrence (int, optional).",
                     ServerName = "BuiltIn",
@@ -200,6 +210,41 @@ namespace OpenCopilot.Mcp
             catch (Exception ex)
             {
                 return Task.FromResult(McpToolCallResult.Failure(ex.Message));
+            }
+        }
+
+        private async Task<McpToolCallResult> GetIdeContextAsync(Dictionary<string, object?> args)
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var dte = await _package.GetServiceAsync(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                var solutionPath = dte?.Solution?.FullName;
+                if (string.IsNullOrWhiteSpace(solutionPath))
+                    return McpToolCallResult.Failure("No solution is open.");
+
+                var activeDocumentPath = dte.ActiveDocument?.FullName;
+                var currentProject = ResolveCurrentProject(dte.Solution?.Projects, activeDocumentPath);
+                var projectFilePath = currentProject?.FullName;
+                var projectFileContent = !string.IsNullOrWhiteSpace(projectFilePath) && File.Exists(projectFilePath)
+                    ? File.ReadAllText(projectFilePath)
+                    : null;
+                var analysis = ProjectContextAnalyzer.Analyze(projectFilePath, projectFileContent, activeDocumentPath);
+
+                var summary = new StringBuilder();
+                summary.AppendLine("Solution: " + solutionPath);
+                summary.AppendLine("Current project: " + (currentProject?.Name ?? "Unknown"));
+                summary.AppendLine("Project file: " + (string.IsNullOrWhiteSpace(analysis.ProjectFilePath) ? "Unknown" : analysis.ProjectFilePath));
+                summary.AppendLine("Project language: " + (string.IsNullOrWhiteSpace(analysis.ProjectLanguage) ? "Unknown" : analysis.ProjectLanguage));
+                summary.AppendLine("Project runtime: " + (string.IsNullOrWhiteSpace(analysis.Runtime) ? "Unknown" : analysis.Runtime));
+                summary.AppendLine("Active document: " + (string.IsNullOrWhiteSpace(analysis.ActiveDocumentPath) ? "None" : analysis.ActiveDocumentPath));
+                summary.AppendLine("Active document language: " + (string.IsNullOrWhiteSpace(analysis.DocumentLanguage) ? "Unknown" : analysis.DocumentLanguage));
+                summary.AppendLine("Recommended next step: read the current project file and the active document before planning edits.");
+                return McpToolCallResult.Success(summary.ToString().TrimEnd());
+            }
+            catch (Exception ex)
+            {
+                return McpToolCallResult.Failure(ex.Message);
             }
         }
 
@@ -714,6 +759,16 @@ namespace OpenCopilot.Mcp
             }
 
             return null;
+        }
+
+        private static EnvDTE.Project? ResolveCurrentProject(EnvDTE.Projects? projects, string? activeDocumentPath)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var containingProject = FindContainingProject(projects, activeDocumentPath);
+            if (containingProject != null)
+                return containingProject;
+
+            return EnumerateProjects(projects).FirstOrDefault();
         }
 
         private static EnvDTE.ProjectItems? FindTargetProjectItems(EnvDTE.Projects? projects, string targetPath, string? relatedPath)

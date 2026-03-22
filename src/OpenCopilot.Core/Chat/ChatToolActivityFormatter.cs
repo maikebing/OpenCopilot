@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using Newtonsoft.Json.Linq;
 using OpenCopilot.Mcp;
 
@@ -13,42 +12,90 @@ namespace OpenCopilot.Chat
     public static class ChatToolActivityFormatter
     {
         /// <summary>
-        /// Formats a concise summary for a tool call and its result.
+        /// Formats a single compact execution step for a tool call.
         /// </summary>
-        public static string Format(AgentToolCall toolCall, McpToolCallResult result)
+        public static string FormatStep(AgentToolCall toolCall, McpToolCallResult result)
         {
             if (toolCall == null)
                 throw new ArgumentNullException(nameof(toolCall));
             if (result == null)
                 throw new ArgumentNullException(nameof(result));
 
-            var builder = new StringBuilder();
-            builder.AppendLine((result.IsError ? "[工具失败] " : "[工具调用] ") + GetToolTitle(toolCall.ToolName));
-
-            if (!string.IsNullOrWhiteSpace(toolCall.Reason))
-                builder.AppendLine("- 步骤：" + Shorten(toolCall.Reason));
-
-            var targetSummary = BuildTargetSummary(toolCall);
-            if (!string.IsNullOrWhiteSpace(targetSummary))
-                builder.AppendLine("- 目标：" + targetSummary);
-
-            builder.AppendLine(result.IsError
-                ? "- 结果：" + Shorten(result.ErrorMessage ?? "未知错误")
-                : "- 结果：" + BuildResultSummary(toolCall.ToolName, result));
-
-            return builder.ToString().TrimEnd();
+            var summary = BuildStepSummary(toolCall);
+            return result.IsError
+                ? $"{GetToolIcon(toolCall.ToolName)} {summary}（失败：{Shorten(result.ErrorMessage ?? "未知错误", 36)}）"
+                : $"{GetToolIcon(toolCall.ToolName)} {summary}";
         }
 
-        private static string GetToolTitle(string toolName)
+        /// <summary>
+        /// Formats an execution-summary card from one or more compact tool steps.
+        /// </summary>
+        public static string FormatExecutionSummary(IEnumerable<string> stepSummaries)
+        {
+            if (stepSummaries == null)
+                throw new ArgumentNullException(nameof(stepSummaries));
+
+            var steps = stepSummaries
+                .Where(step => !string.IsNullOrWhiteSpace(step))
+                .ToArray();
+
+            return steps.Length == 0
+                ? "执行过程摘要：等待工具操作"
+                : "执行过程摘要：" + string.Join(" · ", steps);
+        }
+
+        private static string BuildStepSummary(AgentToolCall toolCall)
+        {
+            var reason = Shorten(toolCall.Reason, 28);
+            var target = BuildTargetSummary(toolCall);
+            if (!string.IsNullOrWhiteSpace(reason) && !string.IsNullOrWhiteSpace(target))
+                return reason + "（" + target + "）";
+            if (!string.IsNullOrWhiteSpace(reason))
+                return reason;
+            if (!string.IsNullOrWhiteSpace(target))
+                return GetToolLabel(toolCall.ToolName) + " " + target;
+
+            return GetToolLabel(toolCall.ToolName);
+        }
+
+        private static string GetToolIcon(string toolName)
         {
             switch (toolName ?? string.Empty)
             {
                 case "vs_read_file":
-                    return "读取文件";
+                    return "📖";
                 case "vs_list_project_files":
-                    return "列出项目文件";
+                    return "🗂️";
                 case "vs_create_file":
-                    return "创建文件";
+                    return "📝";
+                case "vs_edit_file":
+                case "vs_replace_file_content":
+                    return "✏️";
+                case "vs_apply_patch":
+                    return "🩹";
+                case "vs_reencode_file":
+                    return "🔤";
+                case "vs_build_solution":
+                    return "🏗️";
+                case "vs_get_build_errors":
+                    return "📋";
+                case "vs_run_tests":
+                    return "🧪";
+                default:
+                    return "⚙️";
+            }
+        }
+
+        private static string GetToolLabel(string toolName)
+        {
+            switch (toolName ?? string.Empty)
+            {
+                case "vs_read_file":
+                    return "读文件";
+                case "vs_list_project_files":
+                    return "列文件";
+                case "vs_create_file":
+                    return "新建文件";
                 case "vs_edit_file":
                     return "编辑文件";
                 case "vs_replace_file_content":
@@ -79,14 +126,14 @@ namespace OpenCopilot.Chat
                 case "vs_edit_file":
                 case "vs_replace_file_content":
                 case "vs_reencode_file":
-                    return GetString(args, "path");
+                    return ShortenPath(GetString(args, "path"));
                 case "vs_apply_patch":
                     return BuildPatchTargetSummary(args);
                 case "vs_run_tests":
                     return JoinSegments(new[]
                     {
-                        FormatNamedValue("路径", GetString(args, "path")),
-                        FormatNamedValue("筛选", GetString(args, "filter"))
+                        FormatNamedValue("路径", Shorten(GetString(args, "path"), 36)),
+                        FormatNamedValue("筛选", Shorten(GetString(args, "filter"), 36))
                     });
                 case "vs_get_build_errors":
                     return "当前构建输出";
@@ -98,7 +145,7 @@ namespace OpenCopilot.Chat
         private static string BuildReadFileTargetSummary(JObject arguments)
         {
             var segments = new List<string>();
-            var path = GetString(arguments, "path");
+            var path = ShortenPath(GetString(arguments, "path"));
             if (!string.IsNullOrWhiteSpace(path))
                 segments.Add(path);
 
@@ -109,24 +156,24 @@ namespace OpenCopilot.Chat
             var startLine = GetInt(arguments, "startLine");
             var endLine = GetInt(arguments, "endLine");
             if (startLine > 0 || endLine > 0)
-                segments.Add(endLine > 0 ? $"第 {Math.Max(1, startLine)}-{endLine} 行" : $"从第 {Math.Max(1, startLine)} 行开始");
+                segments.Add(endLine > 0 ? $"{Math.Max(1, startLine)}-{endLine} 行" : $"第 {Math.Max(1, startLine)} 行起");
 
             var targetLine = GetInt(arguments, "targetLine");
             var contextLines = GetInt(arguments, "contextLines");
             if (targetLine > 0)
-                segments.Add(contextLines > 0 ? $"目标行 {targetLine}，上下文 {contextLines} 行" : $"目标行 {targetLine}");
+                segments.Add(contextLines > 0 ? $"目标行 {targetLine}±{contextLines}" : $"目标行 {targetLine}");
 
             var startChar = GetInt(arguments, "startChar");
             var charLength = GetInt(arguments, "charLength");
             if (startChar >= 0)
-                segments.Add(charLength > 0 ? $"字符 {startChar}+{charLength}" : $"字符 {startChar} 起");
+                segments.Add(charLength > 0 ? $"字符 {startChar}+{charLength}" : $"字符 {startChar}");
 
             return JoinSegments(segments);
         }
 
         private static string BuildPatchTargetSummary(JObject arguments)
         {
-            var path = GetString(arguments, "path");
+            var path = ShortenPath(GetString(arguments, "path"));
             if (!string.IsNullOrWhiteSpace(path))
                 return path;
 
@@ -143,43 +190,6 @@ namespace OpenCopilot.Chat
             return fileCount > 0 ? $"{fileCount} 个文件" : "补丁内容";
         }
 
-        private static string BuildResultSummary(string toolName, McpToolCallResult result)
-        {
-            switch (toolName ?? string.Empty)
-            {
-                case "vs_read_file":
-                    return "已读取文件内容";
-                case "vs_list_project_files":
-                    return FormatCountSummary(result.GetTextContent(), "个文件");
-                case "vs_create_file":
-                    return "已创建文件";
-                case "vs_edit_file":
-                case "vs_replace_file_content":
-                    return "已更新文件";
-                case "vs_apply_patch":
-                    return "已应用补丁";
-                case "vs_reencode_file":
-                    return "已完成编码转换";
-                case "vs_build_solution":
-                    return "已返回构建结果";
-                case "vs_get_build_errors":
-                    return "已返回构建错误摘要";
-                case "vs_run_tests":
-                    return "已返回测试结果";
-                default:
-                    return string.IsNullOrWhiteSpace(result.GetTextContent()) ? "已完成" : "已返回结果摘要";
-            }
-        }
-
-        private static string FormatCountSummary(string text, string unit)
-        {
-            var count = text
-                .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
-                .Length;
-
-            return count > 0 ? $"已返回 {count} {unit}" : "已返回结果摘要";
-        }
-
         private static string FormatNamedValue(string name, string value)
             => string.IsNullOrWhiteSpace(value) ? string.Empty : name + "：" + value;
 
@@ -191,6 +201,19 @@ namespace OpenCopilot.Chat
 
         private static int GetInt(JObject arguments, string name)
             => arguments[name]?.ToObject<int>() ?? 0;
+
+        private static string ShortenPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return string.Empty;
+
+            var normalized = path.Replace('\\', '/').Trim();
+            var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length <= 3)
+                return normalized;
+
+            return string.Join("/", segments.Skip(segments.Length - 3));
+        }
 
         private static string Shorten(string value, int maxLength = 80)
         {

@@ -44,6 +44,7 @@ namespace OpenCopilot.ToolWindows
         private readonly ObservableCollection<string> _models = new ObservableCollection<string>();
         private readonly HashSet<string> _retainedChangedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _preferredModelsByProvider = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> _activeToolSummarySteps = new List<string>();
 
         private OpenCopilotPackage? _package;
         private LlmService? _llmService;
@@ -407,6 +408,7 @@ namespace OpenCopilot.ToolWindows
 
             _cts?.Cancel();
             _cts = new CancellationTokenSource();
+            _activeToolSummarySteps.Clear();
 
             try
             {
@@ -458,6 +460,7 @@ namespace OpenCopilot.ToolWindows
             }
             finally
             {
+                _activeToolSummarySteps.Clear();
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 InputBox.IsEnabled = true;
                 SendButton.IsEnabled = true;
@@ -659,6 +662,10 @@ namespace OpenCopilot.ToolWindows
 
             var agentMessages = new List<LlmMessage>(history) { LlmMessage.User(promptMessage) };
             var systemPrompt = BuildAgentSystemPrompt(tools);
+            var primingPrompts = await PrimeAgentWorkspaceContextAsync(mcpService, cancellationToken).ConfigureAwait(false);
+            var hasWrittenToIde = false;
+            if (primingPrompts.Count > 0)
+                agentMessages.Add(LlmMessage.User(string.Join("\n\n", primingPrompts)));
 
             for (var iteration = 0; iteration < MaxAgentIterations; iteration++)
             {
@@ -668,7 +675,16 @@ namespace OpenCopilot.ToolWindows
 
                 var directive = AgentDirectiveParser.Parse(response.Content);
                 if (directive.ToolCalls.Count == 0)
+                {
+                    if (AgentTaskClassifier.ShouldEnforceIdeWrite(promptMessage, hasWrittenToIde))
+                    {
+                        agentMessages.Add(LlmMessage.Assistant(response.Content));
+                        agentMessages.Add(LlmMessage.User("You have not written the requested code changes into the IDE yet. For implementation, bug-fix, refactor, or edit tasks, you must apply the change through MCP IDE editing tools before returning the final answer. Continue with JSON tool calls only."));
+                        continue;
+                    }
+
                     return LlmResponse.Success(directive.FinalMessage, response.FinishReason, response.PromptTokens, response.CompletionTokens);
+                }
 
                 agentMessages.Add(LlmMessage.Assistant(response.Content));
 
@@ -680,6 +696,8 @@ namespace OpenCopilot.ToolWindows
                     toolPrompts.Add(BuildToolResultPrompt(toolCall.ToolName, toolResult));
                     hasFileMutations |= IsMutatingTool(toolCall.ToolName);
                 }
+
+                hasWrittenToIde |= hasFileMutations;
 
                 if (hasFileMutations)
                 {
@@ -716,8 +734,18 @@ namespace OpenCopilot.ToolWindows
             builder.AppendLine("When you are done, respond with ONLY a single JSON object using this shape:");
             builder.AppendLine("{\"type\":\"final\",\"message\":\"user-facing answer\"}");
             builder.AppendLine("You may request multiple tools in one response when the order is clear. Do not invent tool results.");
+            builder.AppendLine("vs_get_ide_context has already been called for this turn. Before any real code changes, you must have that IDE context available and use it as your starting point.");
+            builder.AppendLine("For coding tasks, start by calling vs_get_ide_context so you know the current solution, current project, active document, language, and runtime.");
+            builder.AppendLine("Before editing code, read the relevant project file and source files with MCP tools, then analyze the language and runtime using the current solution, current project, and current active document together.");
+            builder.AppendLine("Current project first: keep your investigation and edits inside the current project unless the user explicitly asks for broader changes or the dependency chain proves another project must change.");
+            builder.AppendLine("Current active document first: when the active document is related to the task, inspect it before searching elsewhere and treat it as the primary file for local context.");
+            builder.AppendLine("Repository AI instruction or memory files are high priority. Early in the task, inspect files such as .github/copilot-instructions.md, AGENTS.md, CLAUDE.md, GEMINI.md, CODEX.md, OPENCODE.md, OPENCLAW.md, and similar files when they exist, then follow them.");
+            builder.AppendLine("If the task requires code changes, you must write the change into the IDE by using MCP file-editing tools such as vs_apply_patch, vs_edit_file, vs_replace_file_content, and vs_create_file before you return a final answer.");
+            builder.AppendLine("Do not stop at analysis, advice, or code blocks. Do not ask the user to paste code manually when you can edit through the IDE tools.");
+            builder.AppendLine("For implementation, bug-fix, refactor, rename, delete, create-file, or patch tasks, a final answer is valid only after the code has been applied inside the IDE.");
             builder.AppendLine("After any file modifications, expect the system to run a solution build automatically, return build errors when the build fails, and run unit tests automatically when the build succeeds.");
             builder.AppendLine("Use vs_read_file with line ranges, character windows, target-line context windows, or anchorText windows for focused inspection when possible.");
+            builder.AppendLine("Use vs_list_project_files after vs_get_ide_context when you need to understand the current solution or project layout before selecting files to read.");
             builder.AppendLine("vs_run_tests will try to narrow execution to affected test projects and infer useful FullyQualifiedName filters from changed source files, including common method-based `Should_`, `When_`, `Given_`, and `Given_When_Then` naming patterns, when no explicit path or filter is provided.");
             builder.AppendLine("Prefer patch-level edits with vs_apply_patch when you need multiple hunks or multiple files; it supports SEARCH/REPLACE blocks, fuller unified diff headers, copy/rename headers, mode-change metadata, and @@ hunks, applies file modes on non-Windows when possible, and rejects duplicate, directory-level, or unsafe target paths.");
             builder.AppendLine();
@@ -732,6 +760,40 @@ namespace OpenCopilot.ToolWindows
             return builder.ToString().TrimEnd();
         }
 
+        private async Task<List<string>> PrimeAgentWorkspaceContextAsync(McpService mcpService, CancellationToken cancellationToken)
+        {
+            var prompts = new List<string>();
+
+            var ideContextResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCallModel.Empty("vs_get_ide_context"), cancellationToken).ConfigureAwait(false);
+            prompts.Add(BuildToolResultPrompt("vs_get_ide_context", ideContextResult));
+
+            var filesResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCallModel.Empty("vs_list_project_files"), cancellationToken).ConfigureAwait(false);
+            prompts.Add(BuildToolResultPrompt("vs_list_project_files", filesResult));
+
+            if (filesResult.IsError)
+                return prompts;
+
+            var knownInstructionFiles = AiInstructionFileLocator.FindRelevantFiles(_solutionDirectory, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+                .Take(6)
+                .ToArray();
+
+            foreach (var instructionFile in knownInstructionFiles)
+            {
+                var readInstructionResult = await ExecuteAgentToolCallAsync(
+                        mcpService,
+                        new AgentToolCallModel(
+                            "vs_read_file",
+                            JObject.FromObject(new { path = instructionFile }),
+                            "read repository AI instruction file"),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                prompts.Add(BuildToolResultPrompt("vs_read_file", readInstructionResult));
+            }
+
+            return prompts;
+        }
+
         private async Task<McpToolCallResult> ExecuteAgentToolCallAsync(McpService mcpService, AgentToolCallModel toolCall, CancellationToken cancellationToken)
         {
             var arguments = toolCall.Arguments?.Properties().ToDictionary(
@@ -743,11 +805,23 @@ namespace OpenCopilot.ToolWindows
             var result = await mcpService.CallToolAsync(toolCall.ToolName, arguments, cancellationToken).ConfigureAwait(false);
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-            var toolMessage = ChatToolActivityFormatter.Format(toolCall, result);
-
-            _messages.Add(new ChatMessage("Tool", toolMessage));
+            AppendToolExecutionSummary(ChatToolActivityFormatter.FormatStep(toolCall, result));
             ChatScrollViewer.ScrollToBottom();
             return result;
+        }
+
+        private void AppendToolExecutionSummary(string stepSummary)
+        {
+            if (string.IsNullOrWhiteSpace(stepSummary))
+                return;
+
+            _activeToolSummarySteps.Add(stepSummary);
+            var summaryCard = ChatToolActivityFormatter.FormatExecutionSummary(_activeToolSummarySteps);
+
+            if (_messages.Count > 0 && string.Equals(_messages[_messages.Count - 1].Sender, "Tool", StringComparison.Ordinal))
+                _messages[_messages.Count - 1] = new ChatMessage("Tool", summaryCard);
+            else
+                _messages.Add(new ChatMessage("Tool", summaryCard));
         }
 
         private static string BuildToolResultPrompt(string toolName, McpToolCallResult result)
