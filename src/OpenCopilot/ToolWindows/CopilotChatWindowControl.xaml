@@ -138,7 +138,7 @@
                                     Margin="{Binding BubbleMargin}"
                                     HorizontalAlignment="{Binding BubbleAlignment}"
                                     MaxWidth="320">
-                                <TextBox Text="{Binding Content, Mode=OneWay}"
+                                <TextBox Text="{Binding Content, Mode=OneTime}"
                                          Foreground="{Binding TextForeground}"
                                          FontFamily="{Binding TextFont}"
                                          TextWrapping="Wrap"

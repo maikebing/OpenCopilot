@@ -14,6 +14,9 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.Win32;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using OpenCopilot.Mcp;
 using OpenCopilot.Options;
 using OpenCopilot.Providers;
 using OpenCopilot.Services;
@@ -57,6 +60,7 @@ namespace OpenCopilot.ToolWindows
 
         private const int MaxHistoryMessages = 20;
         private const int MaxAttachmentCharacters = 12000;
+        private const int MaxAgentIterations = 6;
 
         internal bool IsInitialized => _package != null && _llmService != null;
 
@@ -404,8 +408,9 @@ namespace OpenCopilot.ToolWindows
 
             try
             {
-                var request = CreateChatRequest(history, promptMessage);
-                var response = await _llmService.CompleteAsync(request, _cts.Token).ConfigureAwait(false);
+                var response = _selectedInteractionMode == ChatInteractionMode.Agent
+                    ? await RunAgentTurnAsync(history, promptMessage, _cts.Token).ConfigureAwait(false)
+                    : await _llmService.CompleteAsync(CreateChatRequest(history, promptMessage), _cts.Token).ConfigureAwait(false);
 
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 TypingIndicator.Visibility = Visibility.Collapsed;
@@ -613,11 +618,16 @@ namespace OpenCopilot.ToolWindows
         private LlmRequest CreateChatRequest(IReadOnlyList<LlmMessage> history, string userMessage)
         {
             var messages = new List<LlmMessage>(history) { LlmMessage.User(userMessage) };
+            return CreateChatRequestFromMessages(messages, BuildSystemPrompt());
+        }
+
+        private LlmRequest CreateChatRequestFromMessages(IReadOnlyList<LlmMessage> messages, string systemPrompt)
+        {
             return new LlmRequest
             {
                 Model = _selectedModelName,
-                SystemPrompt = BuildSystemPrompt(),
-                Messages = messages,
+                SystemPrompt = systemPrompt,
+                Messages = new List<LlmMessage>(messages),
                 Temperature = _selectedInteractionMode == ChatInteractionMode.Ask ? 0.4 : 0.2,
                 MaxTokens = 2048
             };
@@ -629,6 +639,202 @@ namespace OpenCopilot.ToolWindows
                 ? "You are OpenCopilot in consultation mode. Focus on asking clarifying questions, evaluating options, explaining trade-offs, and having a technical dialogue. Do not assume the user wants code changes unless they explicitly ask for code examples."
                 : "You are OpenCopilot in agent mode. Help with programming tasks such as implementation planning, code generation, bug fixing, refactoring, and concrete code changes. Prefer actionable engineering guidance."
                 ;
+        }
+
+        private async Task<LlmResponse> RunAgentTurnAsync(IReadOnlyList<LlmMessage> history, string promptMessage, CancellationToken cancellationToken)
+        {
+            if (_llmService == null || _package == null)
+                throw new InvalidOperationException("Agent mode requires initialized services.");
+
+            var mcpService = await _package.GetServiceAsync(typeof(McpService)).ConfigureAwait(true) as McpService;
+            if (mcpService == null)
+                return await _llmService.CompleteAsync(CreateChatRequest(history, promptMessage), cancellationToken).ConfigureAwait(false);
+
+            var tools = await mcpService.GetAllToolsAsync(cancellationToken).ConfigureAwait(false);
+            if (tools.Count == 0)
+                return await _llmService.CompleteAsync(CreateChatRequest(history, promptMessage), cancellationToken).ConfigureAwait(false);
+
+            var agentMessages = new List<LlmMessage>(history) { LlmMessage.User(promptMessage) };
+            var systemPrompt = BuildAgentSystemPrompt(tools);
+
+            for (var iteration = 0; iteration < MaxAgentIterations; iteration++)
+            {
+                var response = await _llmService.CompleteAsync(CreateChatRequestFromMessages(agentMessages, systemPrompt), cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccess)
+                    return response;
+
+                var directive = ParseAgentDirective(response.Content);
+                if (directive.ToolCalls.Count == 0)
+                    return LlmResponse.Success(directive.FinalMessage, response.FinishReason, response.PromptTokens, response.CompletionTokens);
+
+                agentMessages.Add(LlmMessage.Assistant(response.Content));
+
+                var toolPrompts = new List<string>();
+                var hasFileMutations = false;
+                foreach (var toolCall in directive.ToolCalls)
+                {
+                    var toolResult = await ExecuteAgentToolCallAsync(mcpService, toolCall, cancellationToken).ConfigureAwait(false);
+                    toolPrompts.Add(BuildToolResultPrompt(toolCall.ToolName, toolResult));
+                    hasFileMutations |= IsMutatingTool(toolCall.ToolName);
+                }
+
+                if (hasFileMutations)
+                {
+                    var buildResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCall.Empty("vs_build_solution"), cancellationToken).ConfigureAwait(false);
+                    toolPrompts.Add(BuildToolResultPrompt("vs_build_solution", buildResult));
+
+                    if (buildResult.IsError)
+                    {
+                        var errorResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCall.Empty("vs_get_build_errors"), cancellationToken).ConfigureAwait(false);
+                        toolPrompts.Add(BuildToolResultPrompt("vs_get_build_errors", errorResult));
+                    }
+                    else
+                    {
+                        var testResult = await ExecuteAgentToolCallAsync(mcpService, AgentToolCall.Empty("vs_run_tests"), cancellationToken).ConfigureAwait(false);
+                        toolPrompts.Add(BuildToolResultPrompt("vs_run_tests", testResult));
+                    }
+                }
+
+                agentMessages.Add(LlmMessage.User(string.Join("\n\n", toolPrompts)));
+            }
+
+            return LlmResponse.Failure("Agent reached the maximum tool iteration count before producing a final answer.");
+        }
+
+        private string BuildAgentSystemPrompt(IReadOnlyList<McpTool> tools)
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine(BuildSystemPrompt());
+            builder.AppendLine();
+            builder.AppendLine("You can inspect and modify the open Visual Studio solution by calling IDE tools.");
+            builder.AppendLine("When you need tools, respond with ONLY a single JSON object using one of these shapes:");
+            builder.AppendLine("{\"type\":\"tool_call\",\"tool\":\"tool_name\",\"arguments\":{...},\"reason\":\"short reason\"}");
+            builder.AppendLine("{\"type\":\"tool_calls\",\"calls\":[{\"tool\":\"tool_name\",\"arguments\":{...}}]}");
+            builder.AppendLine("When you are done, respond with ONLY a single JSON object using this shape:");
+            builder.AppendLine("{\"type\":\"final\",\"message\":\"user-facing answer\"}");
+            builder.AppendLine("You may request multiple tools in one response when the order is clear. Do not invent tool results.");
+            builder.AppendLine("After any file modifications, expect the system to run a solution build automatically, return build errors when the build fails, and run unit tests automatically when the build succeeds.");
+            builder.AppendLine("Use vs_read_file with line ranges for focused inspection when possible.");
+            builder.AppendLine("Prefer patch-level edits with vs_apply_patch when you need multiple hunks or multiple files; its SEARCH blocks must match exactly one location.");
+            builder.AppendLine();
+            builder.AppendLine("Available tools:");
+
+            foreach (var tool in tools)
+            {
+                builder.AppendLine(tool.ToPromptDescription());
+                builder.AppendLine();
+            }
+
+            return builder.ToString().TrimEnd();
+        }
+
+        private async Task<McpToolCallResult> ExecuteAgentToolCallAsync(McpService mcpService, AgentToolCall toolCall, CancellationToken cancellationToken)
+        {
+            var arguments = toolCall.Arguments?.Properties().ToDictionary(
+                property => property.Name,
+                property => property.Value.ToObject<object>(),
+                StringComparer.OrdinalIgnoreCase)
+                ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+            var result = await mcpService.CallToolAsync(toolCall.ToolName, arguments, cancellationToken).ConfigureAwait(false);
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            var toolMessage = result.IsError
+                ? $"[工具失败] {toolCall.ToolName}\n{result.ErrorMessage}"
+                : $"[工具调用] {toolCall.ToolName}\n{result.GetTextContent()}";
+
+            _messages.Add(new ChatMessage("Tool", toolMessage));
+            ChatScrollViewer.ScrollToBottom();
+            return result;
+        }
+
+        private static string BuildToolResultPrompt(string toolName, McpToolCallResult result)
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine($"Tool result for {toolName}:");
+            if (result.IsError)
+                builder.AppendLine("ERROR: " + (result.ErrorMessage ?? "Unknown tool error."));
+            else
+                builder.AppendLine(result.GetTextContent());
+
+            builder.AppendLine();
+            builder.AppendLine("Continue by either requesting the next tool with JSON or returning the final answer JSON.");
+            return builder.ToString().TrimEnd();
+        }
+
+        private static AgentDirective ParseAgentDirective(string responseContent)
+        {
+            var payload = ExtractJsonObject(responseContent);
+            if (string.IsNullOrWhiteSpace(payload))
+                return AgentDirective.Final(responseContent);
+
+            try
+            {
+                var json = JObject.Parse(payload);
+                var type = json["type"]?.ToString();
+                if (string.Equals(type, "tool_call", StringComparison.OrdinalIgnoreCase))
+                {
+                    var toolName = json["tool"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(toolName))
+                        return AgentDirective.FromToolCalls(new[] { new AgentToolCall(toolName, json["arguments"] as JObject ?? new JObject()) });
+                }
+
+                if (string.Equals(type, "tool_calls", StringComparison.OrdinalIgnoreCase))
+                {
+                    var calls = json["calls"] as JArray;
+                    if (calls != null)
+                    {
+                        var parsedCalls = new List<AgentToolCall>();
+                        foreach (var call in calls.OfType<JObject>())
+                        {
+                            var toolName = call["tool"]?.ToString();
+                            if (!string.IsNullOrWhiteSpace(toolName))
+                                parsedCalls.Add(new AgentToolCall(toolName, call["arguments"] as JObject ?? new JObject()));
+                        }
+
+                        if (parsedCalls.Count > 0)
+                            return AgentDirective.FromToolCalls(parsedCalls);
+                    }
+                }
+
+                if (string.Equals(type, "final", StringComparison.OrdinalIgnoreCase))
+                    return AgentDirective.Final(json["message"]?.ToString() ?? responseContent);
+            }
+            catch (JsonException)
+            {
+            }
+
+            return AgentDirective.Final(responseContent);
+        }
+
+        private static string? ExtractJsonObject(string responseContent)
+        {
+            var trimmed = (responseContent ?? string.Empty).Trim();
+            if (trimmed.StartsWith("```", StringComparison.Ordinal))
+            {
+                var firstLineBreak = trimmed.IndexOf('\n');
+                if (firstLineBreak >= 0)
+                    trimmed = trimmed.Substring(firstLineBreak + 1).Trim();
+
+                var closingFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+                if (closingFence >= 0)
+                    trimmed = trimmed.Substring(0, closingFence).Trim();
+            }
+
+            var start = trimmed.IndexOf('{');
+            var end = trimmed.LastIndexOf('}');
+            return start >= 0 && end > start
+                ? trimmed.Substring(start, end - start + 1)
+                : null;
+        }
+
+        private static bool IsMutatingTool(string toolName)
+        {
+            return string.Equals(toolName, "vs_create_file", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(toolName, "vs_edit_file", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(toolName, "vs_replace_file_content", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(toolName, "vs_reencode_file", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(toolName, "vs_apply_patch", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task NotifyProviderSelectionChangedAsync()
@@ -1160,6 +1366,41 @@ namespace OpenCopilot.ToolWindows
 
             return history;
         }
+    }
+
+    internal sealed class AgentDirective
+    {
+        private AgentDirective(IReadOnlyList<AgentToolCall> toolCalls, string finalMessage)
+        {
+            ToolCalls = toolCalls;
+            FinalMessage = finalMessage;
+        }
+
+        public IReadOnlyList<AgentToolCall> ToolCalls { get; }
+
+        public string FinalMessage { get; }
+
+        public static AgentDirective FromToolCalls(IReadOnlyList<AgentToolCall> toolCalls)
+            => new AgentDirective(toolCalls ?? Array.Empty<AgentToolCall>(), string.Empty);
+
+        public static AgentDirective Final(string finalMessage)
+            => new AgentDirective(Array.Empty<AgentToolCall>(), finalMessage ?? string.Empty);
+    }
+
+    internal sealed class AgentToolCall
+    {
+        public AgentToolCall(string toolName, JObject arguments)
+        {
+            ToolName = toolName ?? string.Empty;
+            Arguments = arguments;
+        }
+
+        public string ToolName { get; }
+
+        public JObject Arguments { get; }
+
+        public static AgentToolCall Empty(string toolName)
+            => new AgentToolCall(toolName, new JObject());
     }
 
     /// <summary>View model for a single chat bubble.</summary>
