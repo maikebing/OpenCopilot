@@ -714,8 +714,9 @@ namespace OpenCopilot.ToolWindows
             builder.AppendLine("{\"type\":\"final\",\"message\":\"user-facing answer\"}");
             builder.AppendLine("You may request multiple tools in one response when the order is clear. Do not invent tool results.");
             builder.AppendLine("After any file modifications, expect the system to run a solution build automatically, return build errors when the build fails, and run unit tests automatically when the build succeeds.");
-            builder.AppendLine("Use vs_read_file with line ranges for focused inspection when possible.");
-            builder.AppendLine("Prefer patch-level edits with vs_apply_patch when you need multiple hunks or multiple files; its SEARCH blocks must match exactly one location.");
+            builder.AppendLine("Use vs_read_file with line ranges, character windows, target-line context windows, or anchorText windows for focused inspection when possible.");
+            builder.AppendLine("vs_run_tests will try to narrow execution to affected test projects and infer useful FullyQualifiedName filters from changed source files, including common method-based `Should_`, `When_`, `Given_`, and `Given_When_Then` naming patterns, when no explicit path or filter is provided.");
+            builder.AppendLine("Prefer patch-level edits with vs_apply_patch when you need multiple hunks or multiple files; it supports SEARCH/REPLACE blocks, fuller unified diff headers, copy/rename headers, mode-change metadata, and @@ hunks, applies file modes on non-Windows when possible, and rejects duplicate, directory-level, or unsafe target paths.");
             builder.AppendLine();
             builder.AppendLine("Available tools:");
 
