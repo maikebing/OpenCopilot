@@ -1,0 +1,55 @@
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+  <Metadata>
+    <Identity Id="OpenCopilot.VisualStudio" Version="1.0.0" Language="en-US" Publisher="OpenCopilot" />
+    <DisplayName>OpenCopilot</DisplayName>
+    <Description xml:space="preserve">An AI-powered coding assistant for Visual Studio supporting OpenAI, DeepSeek, Doubao, Ollama, and Docker Desktop AI providers.</Description>
+    <MoreInfo>https://github.com/OpenCopilot/OpenCopilot</MoreInfo>
+    <Icon>Resources\logo.png</Icon>
+    <PreviewImage>Resources\logo.png</PreviewImage>
+    <Tags>AI, Copilot, Code Completion, OpenAI, DeepSeek, Ollama</Tags>
+  </Metadata>
+  <Installation>
+    <!-- Visual Studio 2022 (17.x) -->
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <!-- Visual Studio 2025 (18.x) -->
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[18.0, 19.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[18.0, 19.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[18.0, 19.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <!-- Visual Studio 2026 (19.x) -->
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[19.0, 20.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[19.0, 20.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[19.0, 20.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName=".NET Framework" Version="[4.7.2,)" />
+    <!-- Minimum MPF version only; no upper bound so the extension works on VS2022, 2025, and 2026 -->
+    <Dependency Id="Microsoft.VisualStudio.MPF.17.0" DisplayName="Visual Studio MPF" Version="[17.0,)" />
+  </Dependencies>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" Path="OpenCopilot.pkgdef" />
+    <Asset Type="Microsoft.VisualStudio.MefComponent" Path="OpenCopilot.dll" />
+  </Assets>
+</PackageManifest>

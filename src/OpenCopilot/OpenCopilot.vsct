@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidOpenCopilotPackage">
+    <Menus>
+      <Menu guid="guidOpenCopilotCmdSet" id="OpenCopilotMenu" priority="0x0600" type="Menu">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_EXTENSIBILITY" />
+        <Strings>
+          <ButtonText>OpenCopilot</ButtonText>
+        </Strings>
+      </Menu>
+    </Menus>
+
+    <Groups>
+      <Group guid="guidOpenCopilotCmdSet" id="OpenCopilotGroup" priority="0x0100">
+        <Parent guid="guidOpenCopilotCmdSet" id="OpenCopilotMenu" />
+      </Group>
+      <Group guid="guidOpenCopilotCmdSet" id="OpenCopilotToolWindowGroup" priority="0x0900">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidOpenCopilotCmdSet" id="cmdidOpenChatWindow" priority="0x0100" type="Button">
+        <Parent guid="guidOpenCopilotCmdSet" id="OpenCopilotGroup" />
+        <Strings>
+          <ButtonText>Open Chat Window</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidOpenCopilotCmdSet" id="cmdidExplainCode" priority="0x0110" type="Button">
+        <Parent guid="guidOpenCopilotCmdSet" id="OpenCopilotGroup" />
+        <Strings>
+          <ButtonText>Explain Code</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidOpenCopilotCmdSet" id="cmdidGenerateCode" priority="0x0120" type="Button">
+        <Parent guid="guidOpenCopilotCmdSet" id="OpenCopilotGroup" />
+        <Strings>
+          <ButtonText>Generate Code</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidOpenCopilotCmdSet" id="cmdidFixCode" priority="0x0130" type="Button">
+        <Parent guid="guidOpenCopilotCmdSet" id="OpenCopilotGroup" />
+        <Strings>
+          <ButtonText>Fix Code</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <CommandPlacements>
+    <CommandPlacement guid="guidOpenCopilotCmdSet" id="cmdidOpenChatWindow" priority="0x0900">
+      <Parent guid="guidOpenCopilotCmdSet" id="OpenCopilotToolWindowGroup" />
+    </CommandPlacement>
+  </CommandPlacements>
+
+  <Symbols>
+    <GuidSymbol name="guidOpenCopilotPackage" value="{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}" />
+    <GuidSymbol name="guidOpenCopilotCmdSet" value="{A1B2C3D4-E5F6-7890-ABCD-EF1234567891}">
+      <IDSymbol name="OpenCopilotMenu" value="0x1000" />
+      <IDSymbol name="OpenCopilotGroup" value="0x1001" />
+      <IDSymbol name="OpenCopilotToolWindowGroup" value="0x1002" />
+      <IDSymbol name="cmdidExplainCode" value="0x0100" />
+      <IDSymbol name="cmdidGenerateCode" value="0x0101" />
+      <IDSymbol name="cmdidFixCode" value="0x0102" />
+      <IDSymbol name="cmdidOpenChatWindow" value="0x0103" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>
